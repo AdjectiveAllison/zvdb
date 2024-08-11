@@ -7,7 +7,7 @@ pub fn build(b: *std.Build) void {
     // Main library
     const lib = b.addStaticLibrary(.{
         .name = "zvdb",
-        .root_source_file = .{ .path = "src/zvdb.zig" },
+        .root_source_file = b.path("src/zvdb.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -15,7 +15,7 @@ pub fn build(b: *std.Build) void {
 
     // Tests
     const main_tests = b.addTest(.{
-        .root_source_file = .{ .path = "src/zvdb.zig" },
+        .root_source_file = b.path("src/zvdb.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -27,7 +27,7 @@ pub fn build(b: *std.Build) void {
 
     // Add unit tests
     const unit_tests = b.addTest(.{
-        .root_source_file = .{ .path = "tests/unit/main.zig" },
+        .root_source_file = b.path("tests/unit/main.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -37,7 +37,7 @@ pub fn build(b: *std.Build) void {
 
     // Add integration tests
     const integration_tests = b.addTest(.{
-        .root_source_file = .{ .path = "tests/integration/full_flow_test.zig" },
+        .root_source_file = b.path("tests/integration/full_flow_test.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -48,7 +48,7 @@ pub fn build(b: *std.Build) void {
     // Examples
     const basic_example = b.addExecutable(.{
         .name = "basic_usage",
-        .root_source_file = .{ .path = "examples/basic_usage.zig" },
+        .root_source_file = b.path("examples/basic_usage.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -57,7 +57,7 @@ pub fn build(b: *std.Build) void {
 
     const advanced_example = b.addExecutable(.{
         .name = "advanced_usage",
-        .root_source_file = .{ .path = "examples/advanced_usage.zig" },
+        .root_source_file = b.path("examples/advanced_usage.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -67,7 +67,7 @@ pub fn build(b: *std.Build) void {
     // Benchmarks
     const index_benchmark = b.addExecutable(.{
         .name = "index_performance",
-        .root_source_file = .{ .path = "benchmarks/index_performance.zig" },
+        .root_source_file = b.path("benchmarks/index_performance.zig"),
         .target = target,
         .optimize = optimize,
     });
@@ -76,7 +76,7 @@ pub fn build(b: *std.Build) void {
 
     const search_benchmark = b.addExecutable(.{
         .name = "search_performance",
-        .root_source_file = .{ .path = "benchmarks/search_performance.zig" },
+        .root_source_file = b.path("benchmarks/search_performance.zig"),
         .target = target,
         .optimize = optimize,
     });
