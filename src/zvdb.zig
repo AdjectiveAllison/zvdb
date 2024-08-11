@@ -19,7 +19,6 @@ pub const ZVDB = struct {
 
     const Self = @This();
 
-
     pub fn init(allocator: Allocator, zvdb_config: config.Config) !*Self {
         const self = try allocator.create(Self);
         errdefer allocator.destroy(self);
@@ -65,17 +64,32 @@ pub const ZVDB = struct {
         return id;
     }
 
-
     pub fn search(self: *Self, query: []const f32, limit: usize) ![]SearchResult {
         if (query.len != self.config.dimension) {
             return error.InvalidVectorDimension;
         }
 
         const results = try self.index.search(self.allocator, query, limit);
-        defer self.allocator.free(results);
+        defer {
+            for (results) |*result| {
+                if (result.metadata) |md| {
+                    md.deinit();
+                    self.allocator.destroy(md);
+                }
+            }
+            self.allocator.free(results);
+        }
 
         var search_results = try self.allocator.alloc(SearchResult, results.len);
-        errdefer self.allocator.free(search_results);
+        errdefer {
+            for (search_results) |*result| {
+                if (result.metadata) |md| {
+                    md.deinit();
+                    self.allocator.destroy(md);
+                }
+            }
+            self.allocator.free(search_results);
+        }
 
         for (results, 0..) |result, i| {
             const stored_item = try self.memory_storage.get(result.id);

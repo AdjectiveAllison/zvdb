@@ -61,10 +61,13 @@ pub const Index = struct {
 pub const SearchResult = struct {
     id: u64,
     similarity: f32,
-    metadata: *metadata.MetadataSchema,
+    metadata: ?*metadata.MetadataSchema,
 
     pub fn deinit(self: *SearchResult, allocator: Allocator) void {
-        self.metadata.deinit(allocator);
+        if (self.metadata) |md| {
+            md.deinit();
+            allocator.destroy(md);
+        }
     }
 };
 

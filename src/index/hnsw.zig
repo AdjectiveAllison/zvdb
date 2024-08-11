@@ -309,6 +309,14 @@ pub const HNSW = struct {
         defer self.allocator.free(neighbors);
 
         const result = try self.allocator.alloc(KnnResult, @min(k, neighbors.len));
+        errdefer {
+            for (result) |*item| {
+                item.deinit();
+                self.allocator.destroy(item);
+            }
+            self.allocator.free(result);
+        }
+
         for (neighbors[0..@min(k, neighbors.len)], 0..) |id, i| {
             const node = self.nodes.get(id).?;
             result[i] = .{
