@@ -129,6 +129,9 @@ pub const Persistence = struct {
         // Deserialize vectors and metadata
         try zvdb.memory_storage.deserializeVectors(self.allocator, self.file_format.vector_data);
         try zvdb.memory_storage.deserializeMetadata(self.allocator, self.file_format.metadata);
+
+        std.debug.print("Vectors and metadata deserialized successfully\n", .{});
+        std.debug.print("Loaded {} vectors into memory storage\n", .{zvdb.memory_storage.count()});
     }
     fn validateFileHeader(self: *Self) !void {
         if (!std.mem.eql(u8, &self.file_format.header.magic_number, "ZVDB")) {

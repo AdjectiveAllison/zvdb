@@ -153,6 +153,62 @@ pub const MemoryStorage = struct {
         return serialized_data.toOwnedSlice();
     }
 
+    pub fn deserializeVectors(self: *Self, allocator: Allocator, data: []const u8) !void {
+        var stream = std.io.fixedBufferStream(data);
+        var reader = stream.reader();
+
+        while (stream.pos < stream.buffer.len) {
+            const id = try reader.readInt(u64, .little);
+            const vector_len = try reader.readInt(u32, .little);
+
+            var vector = try allocator.alloc(f32, vector_len);
+            errdefer allocator.free(vector);
+
+            var i: usize = 0;
+            while (i < vector_len) : (i += 1) {
+                const bits = try reader.readInt(u32, .little);
+                vector[i] = @bitCast(bits);
+            }
+
+            try self.vectors.put(id, vector);
+        }
+    }
+
+    pub fn deserializeMetadata(self: *Self, allocator: Allocator, data: []const u8) !void {
+        var stream = std.io.fixedBufferStream(data);
+        var reader = stream.reader();
+
+        while (stream.pos < stream.buffer.len) {
+            const id = try reader.readInt(u64, .little);
+            const md_len = try reader.readInt(u32, .little);
+
+            var md_buffer = try allocator.alloc(u8, md_len);
+            defer allocator.free(md_buffer);
+
+            _ = try reader.readAll(md_buffer);
+
+            var md = try metadata.MetadataSchema.init(allocator);
+            errdefer md.deinit();
+
+            const parsed = try std.json.parseFromSlice(std.json.Value, allocator, md_buffer, .{});
+            defer parsed.deinit();
+
+            if (parsed.value.object.get("name")) |name| {
+                try md.setName(name.string);
+            }
+            if (parsed.value.object.get("value")) |value| {
+                md.value = value.float;
+            }
+            if (parsed.value.object.get("tags")) |tags| {
+                for (tags.array.items) |tag| {
+                    try md.addTag(tag.string);
+                }
+            }
+
+            try self.metadata.put(id, try md.clone(allocator));
+        }
+    }
+
     pub fn clone(self: *const Self, allocator: Allocator) !*metadata.MetadataSchema {
         var new_metadata = try allocator.create(metadata.MetadataSchema);
         new_metadata.* = .{
