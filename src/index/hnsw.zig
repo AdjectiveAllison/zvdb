@@ -231,7 +231,7 @@ pub const HNSW = struct {
     }
 
     fn shrinkConnections(self: *Self, node: *Node, level: usize) !void {
-        var connections = try std.PriorityQueue(u64, *const Self, distanceComparator).init(self.allocator, self);
+        var connections = std.PriorityQueue(u64, *const Self, distanceComparator).init(self.allocator, self);
         defer connections.deinit();
 
         for (node.connections.items) |conn_id| {
