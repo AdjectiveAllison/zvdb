@@ -20,9 +20,11 @@ pub const Index = struct {
     const VTable = struct {
         deinitFn: *const fn (ptr: *anyopaque) void,
         addFn: *const fn (ptr: *anyopaque, vector: []const f32) Allocator.Error!u64,
-        searchFn: *const fn (allocator: std.mem.Allocator, ptr: *anyopaque, query: []const f32, limit: usize) Allocator.Error![]SearchResult,
-        deleteFn: *const fn (ptr: *anyopaque, id: u64) Allocator.Error!void,
-        updateFn: *const fn (ptr: *anyopaque, id: u64, vector: []const f32) Allocator.Error!void,
+        searchFn: *const fn (allocator: Allocator, ptr: *anyopaque, query: []const f32, limit: usize) Allocator.Error![]SearchResult,
+        deleteFn: *const fn (ptr: *anyopaque, id: u64) (Allocator.Error || error{NodeNotFound})!void,
+        updateFn: *const fn (ptr: *anyopaque, id: u64, vector: []const f32) (Allocator.Error || error{NodeNotFound})!void,
+        serializeFn: *const fn (ptr: *anyopaque, writer: *std.io.AnyWriter) anyerror!void,
+        deserializeFn: *const fn (ptr: *anyopaque, reader: *std.io.AnyReader) anyerror!void,
     };
 
     pub fn deinit(self: *Index) void {
@@ -37,12 +39,20 @@ pub const Index = struct {
         return self.vtable.searchFn(allocator, self.ptr, query, limit);
     }
 
-    pub fn delete(self: *Index, id: u64) Allocator.Error!void {
+    pub fn delete(self: *Index, id: u64) (Allocator.Error || error{NodeNotFound})!void {
         return self.vtable.deleteFn(self.ptr, id);
     }
 
-    pub fn update(self: *Index, id: u64, vector: []const f32) Allocator.Error!void {
+    pub fn update(self: *Index, id: u64, vector: []const f32) (Allocator.Error || error{NodeNotFound})!void {
         return self.vtable.updateFn(self.ptr, id, vector);
+    }
+
+    pub fn serialize(self: *Index, writer: *std.io.AnyWriter) !void {
+        return self.vtable.serializeFn(self.ptr, writer);
+    }
+
+    pub fn deserialize(self: *Index, reader: *std.io.AnyReader) !void{
+        return self.vtable.deserializeFn(self.ptr, reader);
     }
 };
 
@@ -56,16 +66,22 @@ pub fn createIndex(allocator: Allocator, index_config: IndexConfig) Allocator.Er
         .HNSW => |hnsw_config| {
             const hnsw_ptr = try allocator.create(hnsw.HNSW);
             errdefer allocator.destroy(hnsw_ptr);
-            hnsw_ptr.* = try hnsw.HNSW.init(allocator, hnsw_config, .Euclidean); // Use a default metric for now
+            hnsw_ptr.* = try hnsw.HNSW.init(allocator, hnsw_config, .Euclidean);
 
             const vtable = &.{
-                .deinitFn = deinitHNSW,
-                .addFn = addHNSW,
-                .searchFn = searchHNSW,
-                .deleteFn = deleteHNSW,
-                .updateFn = updateHNSW,
+                .deinitFn = &deinitHNSW,
+                .addFn = &addHNSW,
+                .searchFn = &searchHNSW,
+                .deleteFn = &deleteHNSW,
+                .updateFn = &updateHNSW,
+                .serializeFn = &serializeHNSW,
+                .deserializeFn = &deserializeHNSW,
             };
-            return Index{ .ptr = hnsw_ptr, .vtable = vtable };
+
+            return Index{
+                .ptr = hnsw_ptr,
+                .vtable = vtable,
+            };
         },
         // Add cases for other index types here in the future
     }
@@ -97,12 +113,28 @@ fn searchHNSW(allocator: std.mem.Allocator, ptr: *anyopaque, query: []const f32,
     return search_results;
 }
 
-fn deleteHNSW(ptr: *anyopaque, id: u64) Allocator.Error!void {
+fn deleteHNSW(ptr: *anyopaque, id: u64) (Allocator.Error || error{NodeNotFound})!void {
     const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
     try self.deleteItem(id);
 }
 
-fn updateHNSW(ptr: *anyopaque, id: u64, vector: []const f32) Allocator.Error!void {
+fn updateHNSW(ptr: *anyopaque, id: u64, vector: []const f32) (Allocator.Error || error{NodeNotFound})!void {
     const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
     try self.updateItem(id, vector);
+}
+
+fn serializeHNSW(ptr: *anyopaque, writer: *std.io.AnyWriter) !void {
+    const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
+    // Implement HNSW serialization here
+    _ = self;
+    _ = writer;
+    @panic("HNSW serialization not implemented");
+}
+
+fn deserializeHNSW(ptr: *anyopaque, reader: *std.io.AnyReader) !void {
+    const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
+    // Implement HNSW deserialization here
+    _ = self;
+    _ = reader;
+    @panic("HNSW deserialization not implemented");
 }

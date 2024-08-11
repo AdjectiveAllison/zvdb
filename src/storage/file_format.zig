@@ -42,14 +42,14 @@ pub const FileFormat = struct {
 
     pub fn write(self: *const Self, writer: anytype) !void {
         try writer.writeAll(&self.header.magic_number);
-        try writer.writeIntLittle(u32, self.header.version);
-        try writer.writeIntLittle(u32, self.header.dimension);
+        try writer.writeInt(u32, self.header.version, .little);
+        try writer.writeInt(u32, self.header.dimension, .little);
         try writer.writeByte(self.header.distance_function);
         try writer.writeByte(self.header.index_type);
-        try writer.writeIntLittle(u32, self.header.metadata_schema_length);
+        try writer.writeInt(u32, self.header.metadata_schema_length, .little);
 
         try writer.writeAll(self.metadata_schema);
-        try writer.writeIntLittle(u64, self.vector_count);
+        try writer.writeInt(u64, self.vector_count, .little);
         try writer.writeAll(self.vector_data);
         try writer.writeAll(self.metadata);
         try writer.writeAll(self.index_data);
@@ -57,26 +57,27 @@ pub const FileFormat = struct {
 
     pub fn read(self: *Self, reader: anytype) !void {
         self.header.magic_number = try reader.readBytesNoEof(4);
-        self.header.version = try reader.readIntLittle(u32);
-        self.header.dimension = try reader.readIntLittle(u32);
+        self.header.version = try reader.readInt(u32, .little);
+        self.header.dimension = try reader.readInt(u32, .little);
         self.header.distance_function = try reader.readByte();
         self.header.index_type = try reader.readByte();
-        self.header.metadata_schema_length = try reader.readIntLittle(u32);
+        self.header.metadata_schema_length = try reader.readInt(u32, .little);
 
         self.metadata_schema = try self.allocator.alloc(u8, self.header.metadata_schema_length);
         try reader.readNoEof(self.metadata_schema);
 
-        self.vector_count = try reader.readIntLittle(u64);
+        self.vector_count = try reader.readInt(u64, .little);
         const vector_data_size = self.vector_count * self.header.dimension * @sizeOf(f32);
         self.vector_data = try self.allocator.alloc(u8, vector_data_size);
         try reader.readNoEof(self.vector_data);
 
         // Read metadata and index data
-        // Note: The exact format of metadata and index data may need to be adjusted
-        // based on your specific implementation requirements
-        const remaining_size = try reader.readAll(self.allocator.allocator);
-        const metadata_size = remaining_size / 2;
-        self.metadata = remaining_size[0..metadata_size];
-        self.index_data = remaining_size[metadata_size..];
+        var remaining_data = std.ArrayList(u8).init(self.allocator);
+        defer remaining_data.deinit();
+        try reader.readAllArrayList(&remaining_data, std.math.maxInt(usize));
+
+        const metadata_size = remaining_data.items.len / 2;
+        self.metadata = try self.allocator.dupe(u8, remaining_data.items[0..metadata_size]);
+        self.index_data = try self.allocator.dupe(u8, remaining_data.items[metadata_size..]);
     }
 };

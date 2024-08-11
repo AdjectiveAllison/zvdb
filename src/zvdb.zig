@@ -23,8 +23,11 @@ pub const ZVDB = struct {
 
     const Self = @This();
 
-    pub fn init(allocator: Allocator, zvdb_config: config.Config) !Self {
-        const zvdb = Self{
+    pub fn init(allocator: Allocator, zvdb_config: config.Config) !*Self {
+        const self = try allocator.create(Self);
+        errdefer allocator.destroy(self);
+
+        self.* = .{
             .allocator = allocator,
             .index = try index.createIndex(allocator, zvdb_config.index_config),
             .config = zvdb_config,
@@ -32,7 +35,8 @@ pub const ZVDB = struct {
             .persistence = storage.Persistence.init(allocator),
             .memory_storage = memory.MemoryStorage.init(allocator),
         };
-        return zvdb;
+
+        return self;
     }
 
     pub fn deinit(self: *Self) void {
@@ -47,15 +51,15 @@ pub const ZVDB = struct {
             return error.InvalidVectorDimension;
         }
 
-        if (new_metadata) |md| {
-            try self.metadata_schema.validate(&md);
+        if (new_metadata) |*md| {
+            try self.metadata_schema.validate(md);
         }
 
         const id = try self.index.add(vector);
         const metadata_bytes = if (new_metadata) |md| try std.json.stringifyAlloc(self.allocator, md.getValue(), .{}) else null;
         defer if (metadata_bytes) |mb| self.allocator.free(mb);
 
-        try self.memory_storage.add(vector, metadata_bytes);
+        _ = try self.memory_storage.add(vector, metadata_bytes);
         return id;
     }
 
@@ -64,21 +68,20 @@ pub const ZVDB = struct {
             return error.InvalidVectorDimension;
         }
 
-        const distance_fn = self.config.distance_function;
-        const results = try self.index.search(query, limit, distance_fn);
+        const results = try self.index.search(self.allocator, query, limit);
 
         var search_results = try self.allocator.alloc(SearchResult, results.len);
         for (results, 0..) |result, i| {
             const stored_item = try self.memory_storage.get(result.id);
             const parsed_metadata = if (stored_item.metadata.len > 0)
-                try std.json.parseFromSlice(metadata.json.Metadata, self.allocator, stored_item.metadata, .{})
+                try std.json.parseFromSlice(json.Value, self.allocator, stored_item.metadata, .{})
             else
                 null;
 
             search_results[i] = .{
                 .id = result.id,
-                .distance = result.distance,
-                .metadata = parsed_metadata,
+                .distance = 1.0 - result.similarity, // Convert similarity back to distance
+                .metadata = if (parsed_metadata) |p| metadata.json.Metadata{ .allocator = self.allocator, .data = p.value } else null,
             };
         }
 
@@ -95,18 +98,24 @@ pub const ZVDB = struct {
             return error.InvalidVectorDimension;
         }
 
-        if (new_metadata) |md| {
+        if (new_metadata) |*md| {
             try self.metadata_schema.validate(md);
         }
 
         try self.index.update(id, vector);
-        const metadata_bytes = if (new_metadata) |md| try std.json.stringifyAlloc(self.allocator, md, .{}) else null;
+        const metadata_bytes = if (new_metadata) |md| try std.json.stringifyAlloc(self.allocator, md.getValue(), .{}) else null;
         defer if (metadata_bytes) |mb| self.allocator.free(mb);
 
         try self.memory_storage.update(id, vector, metadata_bytes);
     }
 
     pub fn save(self: *Self, file_path: []const u8) !void {
+        var file = try std.fs.cwd().createFile(file_path, .{});
+        defer file.close();
+        var buffered_writer = std.io.bufferedWriter(file.writer());
+        var any_writer = buffered_writer.writer().any();
+        try self.index.serialize(&any_writer);
+        try buffered_writer.flush();
         try self.persistence.save(self, file_path);
     }
 

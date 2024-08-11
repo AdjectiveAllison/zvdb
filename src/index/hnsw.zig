@@ -18,20 +18,17 @@ const Node = struct {
     vector: []f32,
     connections: ArrayList(u64),
 
-    fn init(allocator: Allocator, id: u64, vector: []const f32) !*Node {
-        const node = try allocator.create(Node);
-        node.* = .{
+    fn init(allocator: Allocator, id: u64, vector: []const f32) !Node {
+        return Node{
             .id = id,
             .vector = try allocator.dupe(f32, vector),
             .connections = ArrayList(u64).init(allocator),
         };
-        return node;
     }
 
     fn deinit(self: *Node, allocator: Allocator) void {
         allocator.free(self.vector);
         self.connections.deinit();
-        allocator.destroy(self);
     }
 };
 
@@ -44,6 +41,11 @@ pub const HNSW = struct {
     distance_metric: DistanceMetric,
 
     const Self = @This();
+
+    pub const KnnResult = struct {
+        id: u64,
+        distance: f32,
+    };
 
     pub fn init(allocator: Allocator, config: HNSWConfig, dist_metric: DistanceMetric) !Self {
         return Self{
@@ -66,7 +68,10 @@ pub const HNSW = struct {
 
     pub fn addItem(self: *Self, vector: []const f32) !u64 {
         const new_id: u64 = @intCast(self.nodes.count());
-        const new_node = try Node.init(self.allocator, new_id, vector);
+        const new_node = try self.allocator.create(Node);
+        errdefer self.allocator.destroy(new_node);
+        new_node.* = try Node.init(self.allocator, new_id, vector);
+
         const level = self.randomLevel();
 
         if (level > self.max_level) {
@@ -128,12 +133,15 @@ pub const HNSW = struct {
         // Remove connections to this node from all other nodes
         for (node.connections.items) |neighbor_id| {
             if (self.nodes.getPtr(neighbor_id)) |neighbor| {
-                _ = neighbor.connections.swapRemove(id);
+                _ = neighbor.*.connections.swapRemove(id);
             }
         }
 
         // Remove the node from the index
-        _ = self.nodes.remove(id);
+        if (self.nodes.remove(id)) {
+            node.deinit(self.allocator);
+            self.allocator.destroy(node);
+        }
 
         // Free the memory associated with the node
         node.deinit(self.allocator);
@@ -141,7 +149,13 @@ pub const HNSW = struct {
         // If the deleted node was the entry point, update it
         if (self.entry_point) |entry_point| {
             if (entry_point == id) {
-                self.entry_point = if (self.nodes.count() > 0) self.nodes.keys()[0] else null;
+                self.entry_point = if (self.nodes.count() > 0)
+                    blk: {
+                        var it = self.nodes.keyIterator();
+                        break :blk if (it.next()) |key_ptr| key_ptr.* else null;
+                    }
+                else
+                    null;
             }
         }
     }
@@ -150,8 +164,8 @@ pub const HNSW = struct {
         const node = self.nodes.getPtr(id) orelse return error.NodeNotFound;
 
         // Update the vector
-        self.allocator.free(node.vector);
-        node.vector = try self.allocator.dupe(f32, vector);
+        self.allocator.free(node.*.vector);
+        node.*.vector = try self.allocator.dupe(f32, vector);
 
         // Reconnect the node in the graph
         const level = self.randomLevel();
@@ -160,25 +174,25 @@ pub const HNSW = struct {
             const neighbors = try self.searchLayer(vector, self.entry_point.?, self.config.ef_construction, curr_level);
             defer self.allocator.free(neighbors);
 
-            try self.reconnectNode(node, neighbors, curr_level);
+            try self.reconnectNode(node.*, neighbors, curr_level);
         }
     }
 
-    pub fn searchKnn(self: *Self, query: []const f32, k: usize) ![]struct { id: u64, distance: f32 } {
+    pub fn searchKnn(self: *Self, query: []const f32, k: usize) ![]KnnResult {
         if (self.entry_point == null) {
-            return &[_]struct { id: u64, distance: f32 }{};
+            return &[_]KnnResult{};
         }
 
         var curr_node_id = self.entry_point.?;
-        var curr_dist = distance.getDistanceFunction(self.distance_metric)(query, self.nodes.get(curr_node_id).?.vector);
+        var curr_dist = distance.getDistanceFunction(self.distance_metric)(query, self.nodes.get(curr_node_id).?.*.vector);
 
         var lc = self.max_level;
         while (lc > 0) : (lc -= 1) {
             var changed = true;
             while (changed) {
                 changed = false;
-                for (self.nodes.get(curr_node_id).?.connections.items) |neighbor_id| {
-                    const neighbor_dist = distance.getDistanceFunction(self.distance_metric)(query, self.nodes.get(neighbor_id).?.vector);
+                for (self.nodes.get(curr_node_id).?.*.connections.items) |neighbor_id| {
+                    const neighbor_dist = distance.getDistanceFunction(self.distance_metric)(query, self.nodes.get(neighbor_id).?.*.vector);
                     if (neighbor_dist < curr_dist) {
                         curr_node_id = neighbor_id;
                         curr_dist = neighbor_dist;
@@ -191,16 +205,17 @@ pub const HNSW = struct {
         const neighbors = try self.searchLayer(query, curr_node_id, self.config.ef_search, 0);
         defer self.allocator.free(neighbors);
 
-        const result = try self.allocator.alloc(struct { id: u64, distance: f32 }, @min(k, neighbors.len));
+        const result = try self.allocator.alloc(KnnResult, @min(k, neighbors.len));
         for (neighbors[0..@min(k, neighbors.len)], 0..) |id, i| {
             result[i] = .{
                 .id = id,
-                .distance = distance.getDistanceFunction(self.distance_metric)(query, self.nodes.get(id).?.vector),
+                .distance = distance.getDistanceFunction(self.distance_metric)(query, self.nodes.get(id).?.*.vector),
             };
         }
 
         return result;
     }
+
     fn randomLevel(self: *Self) usize {
         // Generate a random float between 0 and 1
         const random_float = std.crypto.random.float(f32);
@@ -267,13 +282,13 @@ pub const HNSW = struct {
         }
 
         if (new_node.connections.items.len > self.config.max_connections) {
-            try self.shrinkConnections(new_node, level);
+            try self.pruneConnections(new_node, level);
         }
 
         for (neighbors) |neighbor_id| {
             const neighbor = self.nodes.get(neighbor_id).?;
             if (neighbor.connections.items.len > self.config.max_connections) {
-                try self.shrinkConnections(neighbor, level);
+                try self.pruneConnections(neighbor, level);
             }
         }
     }
@@ -309,7 +324,7 @@ pub const HNSW = struct {
             if (neighbor_id != node.id) {
                 try node.connections.append(neighbor_id);
                 if (self.nodes.getPtr(neighbor_id)) |neighbor| {
-                    try neighbor.connections.append(node.id);
+                    try neighbor.*.connections.append(node.id);
                 }
             }
         }
@@ -324,16 +339,21 @@ pub const HNSW = struct {
 
         for (node.connections.items[start..end]) |neighbor_id| {
             if (self.nodes.getPtr(neighbor_id)) |neighbor| {
-                if (!neighbor.connections.contains(node.id)) {
-                    try neighbor.connections.append(node.id);
+                const contains = for (neighbor.*.connections.items) |conn_id| {
+                    if (conn_id == node.id) break true;
+                } else false;
+
+                if (!contains) {
+                    try neighbor.*.connections.append(node.id);
                 }
             }
         }
 
         // Prune connections if necessary
-        for (self.nodes.values()) |neighbor| {
-            if (neighbor.connections.items.len > (level + 1) * self.config.max_connections) {
-                try self.pruneConnections(neighbor, level);
+        var it = self.nodes.valueIterator();
+        while (it.next()) |neighbor| {
+            if (neighbor.*.connections.items.len > (level + 1) * self.config.max_connections) {
+                try self.pruneConnections(neighbor.*, level);
             }
         }
     }

@@ -25,7 +25,16 @@ pub const Schema = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.allocator.free(self.schema);
+        switch (self.schema) {
+            .null => {},
+            .bool => {},
+            .integer => {},
+            .float => {},
+            .number_string => |str| self.allocator.free(str),
+            .string => |str| self.allocator.free(str),
+            .array => |*arr| arr.deinit(),
+            .object => |*obj| obj.deinit(),
+        }
     }
 
     pub fn validate(self: *const Self, metadata: *const Metadata) SchemaError!void {

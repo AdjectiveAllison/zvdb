@@ -37,8 +37,8 @@ pub fn main() !void {
     const vector1 = [_]f32{ 1.0, 2.0, 3.0 };
     var metadata1 = zvdb.metadata.json.Metadata.init(allocator);
     defer metadata1.deinit();
-    try metadata1.set("name", .{ .String = "Point A" });
-    try metadata1.set("value", .{ .Float = 42.0 });
+    try metadata1.set("name", .{ .string = "Point A" });
+    try metadata1.set("value", .{ .float = 42.0 });
 
     const id1 = try db.add(&vector1, metadata1);
     std.debug.print("Added vector with ID: {}\n", .{id1});
@@ -46,8 +46,8 @@ pub fn main() !void {
     const vector2 = [_]f32{ 4.0, 5.0, 6.0 };
     var metadata2 = zvdb.metadata.json.Metadata.init(allocator);
     defer metadata2.deinit();
-    try metadata2.set("name", .{ .String = "Point B" });
-    try metadata2.set("value", .{ .Float = 73.0 });
+    try metadata2.set("name", .{ .string = "Point B" });
+    try metadata2.set("value", .{ .float = 73.0 });
 
     const id2 = try db.add(&vector2, metadata2);
     std.debug.print("Added vector with ID: {}\n", .{id2});
@@ -61,8 +61,8 @@ pub fn main() !void {
     for (search_results) |result| {
         std.debug.print("  ID: {}, Distance: {d:.4}\n", .{ result.id, result.distance });
         if (result.metadata) |md| {
-            const name = md.get("name").?.String;
-            const value = md.get("value").?.Float;
+            const name = md.get("name").?.string;
+            const value = md.get("value").?.float;
             std.debug.print("    Metadata: name={s}, value={d:.2}\n", .{ name, value });
         }
     }
@@ -71,8 +71,8 @@ pub fn main() !void {
     const updated_vector = [_]f32{ 1.5, 2.5, 3.5 };
     var updated_metadata = zvdb.metadata.json.Metadata.init(allocator);
     defer updated_metadata.deinit();
-    try updated_metadata.set("name", .{ .String = "Updated Point A" });
-    try updated_metadata.set("value", .{ .Float = 50.0 });
+    try updated_metadata.set("name", .{ .string = "Updated Point A" });
+    try updated_metadata.set("value", .{ .float = 50.0 });
 
     try db.update(id1, &updated_vector, updated_metadata);
     std.debug.print("Updated vector with ID: {}\n", .{id1});
@@ -99,8 +99,8 @@ pub fn main() !void {
     for (loaded_search_results) |result| {
         std.debug.print("  ID: {}, Distance: {d:.4}\n", .{ result.id, result.distance });
         if (result.metadata) |md| {
-            const name = md.get("name").?.String;
-            const value = md.get("value").?.Float;
+            const name = md.get("name").?.string;
+            const value = md.get("value").?.float;
             std.debug.print("    Metadata: name={s}, value={d:.2}\n", .{ name, value });
         }
     }

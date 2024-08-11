@@ -17,7 +17,16 @@ pub const Metadata = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.allocator.free(self.data);
+        switch (self.data) {
+            .null => {},
+            .bool => {},
+            .integer => {},
+            .float => {},
+            .number_string => |str| self.allocator.free(str),
+            .string => |str| self.allocator.free(str),
+            .array => |*arr| arr.deinit(),
+            .object => |*obj| obj.deinit(),
+        }
     }
 
     pub fn set(self: *Self, key: []const u8, value: json.Value) !void {
