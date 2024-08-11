@@ -101,6 +101,9 @@ pub const Persistence = struct {
         // Read and validate file header
         self.file_format.read(reader) catch |err| {
             std.debug.print("Error reading file format: {}\n", .{err});
+            if (err == error.MetadataTooLarge) {
+                std.debug.print("Metadata size exceeds the limit. Please check the file integrity.\n", .{});
+            }
             return err;
         };
         self.validateFileHeader() catch |err| {
