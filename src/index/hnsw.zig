@@ -18,16 +18,16 @@ const Node = struct {
     id: u64,
     vector: []f32,
     connections: ArrayList(u64),
-    metadata: []u8,
+    metadata: *metadata.MetadataSchema,
 
-    fn init(allocator: Allocator, id: u64, vector: []const f32, metadata_bytes: []const u8) !*Node {
+    fn init(allocator: Allocator, id: u64, vector: []const f32, md: *metadata.MetadataSchema) !*Node {
         const node = try allocator.create(Node);
         errdefer allocator.destroy(node);
         node.* = .{
             .id = id,
             .vector = try allocator.dupe(f32, vector),
             .connections = ArrayList(u64).init(allocator),
-            .metadata = try allocator.dupe(u8, metadata_bytes),
+            .metadata = md,
         };
         return node;
     }
@@ -35,7 +35,8 @@ const Node = struct {
     fn deinit(self: *Node, allocator: Allocator) void {
         allocator.free(self.vector);
         self.connections.deinit();
-        allocator.free(self.metadata);
+        self.metadata.deinit();
+        allocator.destroy(self.metadata);
         allocator.destroy(self);
     }
 };
@@ -78,11 +79,9 @@ pub const HNSW = struct {
         self.nodes.deinit();
     }
 
-    pub fn addItem(self: *Self, vector: []const f32) !u64 {
+    pub fn addItem(self: *Self, vector: []const f32, md: *metadata.MetadataSchema) !u64 {
         const new_id: u64 = @intCast(self.nodes.count());
-        const metadata_bytes = try std.json.stringifyAlloc(self.allocator, .{}, .{}); // Empty JSON object as placeholder
-        defer self.allocator.free(metadata_bytes);
-        const new_node = try Node.init(self.allocator, new_id, vector, metadata_bytes);
+        const new_node = try Node.init(self.allocator, new_id, vector, md);
         errdefer new_node.deinit(self.allocator);
 
         const level = self.randomLevel();
@@ -281,29 +280,8 @@ pub const HNSW = struct {
                 return error.InvalidMetadataLength;
             }
 
-            const node_metadata_json = try self.allocator.alloc(u8, metadata_len);
-            defer self.allocator.free(node_metadata_json);
-            try reader.readNoEof(node_metadata_json);
-            std.debug.print("Node {} metadata: {} bytes\n", .{id, metadata_len});
-
-            const parsed_metadata = try std.json.parseFromSlice(
-                struct {
-                    name: ?[]const u8,
-                    value: f32,
-                    tags: []const []const u8,
-                },
-                self.allocator,
-                node_metadata_json,
-                .{},
-            );
-            defer parsed_metadata.deinit();
-
-            var node_metadata = metadata.MetadataSchema.init(self.allocator);
-            node_metadata.name = if (parsed_metadata.value.name) |name| try self.allocator.dupe(u8, name) else null;
-            node_metadata.value = parsed_metadata.value.value;
-            try node_metadata.tags.appendSlice(parsed_metadata.value.tags);
-
-            var node = try Node.init(self.allocator, id, vector, &node_metadata);
+            var node_metadata = try metadata.MetadataSchema.deserialize(self.allocator, reader);
+            var node = try Node.init(self.allocator, id, vector, node_metadata);
             node.connections = connections;
             try self.nodes.put(id, node);
         }
