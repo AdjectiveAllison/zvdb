@@ -217,8 +217,7 @@ pub const HNSW = struct {
         }
 
         for (neighbors) |neighbor_id| {
-            // local variable neighbor is never mutated. TODO: change to `const neighbor` or do we need to mutate it?
-            var neighbor = self.nodes.get(neighbor_id).?;
+            const neighbor = self.nodes.get(neighbor_id).?;
             if (neighbor.connections.items.len > self.config.max_connections) {
                 try self.shrinkConnections(neighbor, level);
             }
