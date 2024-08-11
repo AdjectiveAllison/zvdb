@@ -55,7 +55,12 @@ pub fn main() !void {
     // Perform a search
     const query = [_]f32{ 2.0, 3.0, 4.0 };
     const search_results = try db.search(&query, 2);
-    defer allocator.free(search_results);
+    defer {
+        for (search_results) |*result| {
+            result.deinit();
+        }
+        allocator.free(search_results);
+    }
 
     std.debug.print("Search results:\n", .{});
     for (search_results) |result| {
