@@ -4,38 +4,31 @@ const DistanceMetric = distance.DistanceMetric;
 const index = @import("index/index.zig");
 
 pub const Config = struct {
-    // General configuration
+    allocator: std.mem.Allocator,
     dimension: usize,
     distance_metric: DistanceMetric,
-
-    // Index configuration
     index_config: index.IndexConfig,
-
-    // Metadata configuration
-    metadata_schema: []const u8,
-
-    // Storage configuration
     storage_path: ?[]const u8,
 
     pub fn init(
+        allocator: std.mem.Allocator,
         dimension: usize,
         distance_metric: DistanceMetric,
         index_config: index.IndexConfig,
-        metadata_schema: []const u8,
         storage_path: ?[]const u8,
     ) Config {
         return .{
+            .allocator = allocator,
             .dimension = dimension,
             .distance_metric = distance_metric,
             .index_config = index_config,
-            .metadata_schema = metadata_schema,
             .storage_path = storage_path,
         };
     }
 
-    pub fn deinit(self: *Config, allocator: std.mem.Allocator) void {
+    pub fn deinit(self: *Config) void {
         if (self.storage_path) |path| {
-            allocator.free(path);
+            self.allocator.free(path);
         }
     }
 };

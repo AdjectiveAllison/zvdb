@@ -7,13 +7,11 @@ pub const FileHeader = struct {
     dimension: u32,
     distance_function: u8,
     index_type: u8,
-    metadata_schema_length: u32,
 };
 
 pub const FileFormat = struct {
     allocator: Allocator,
     header: FileHeader,
-    metadata_schema: []u8,
     vector_count: u64,
     vector_data: []u8,
     metadata: []u8,
@@ -25,7 +23,6 @@ pub const FileFormat = struct {
         return Self{
             .allocator = allocator,
             .header = undefined,
-            .metadata_schema = &[_]u8{},
             .vector_count = 0,
             .vector_data = &[_]u8{},
             .metadata = &[_]u8{},
@@ -34,7 +31,6 @@ pub const FileFormat = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.allocator.free(self.metadata_schema);
         self.allocator.free(self.vector_data);
         self.allocator.free(self.metadata);
         self.allocator.free(self.index_data);
@@ -46,9 +42,7 @@ pub const FileFormat = struct {
         try writer.writeInt(u32, self.header.dimension, .little);
         try writer.writeByte(self.header.distance_function);
         try writer.writeByte(self.header.index_type);
-        try writer.writeInt(u32, self.header.metadata_schema_length, .little);
 
-        try writer.writeAll(self.metadata_schema);
         try writer.writeInt(u64, self.vector_count, .little);
         try writer.writeAll(self.vector_data);
         try writer.writeAll(self.metadata);
@@ -61,10 +55,6 @@ pub const FileFormat = struct {
         self.header.dimension = try reader.readInt(u32, .little);
         self.header.distance_function = try reader.readByte();
         self.header.index_type = try reader.readByte();
-        self.header.metadata_schema_length = try reader.readInt(u32, .little);
-
-        self.metadata_schema = try self.allocator.alloc(u8, self.header.metadata_schema_length);
-        try reader.readNoEof(self.metadata_schema);
 
         self.vector_count = try reader.readInt(u64, .little);
         const vector_data_size = self.vector_count * self.header.dimension * @sizeOf(f32);

@@ -8,49 +8,37 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     // Configure ZVDB
-    const zvdb_config = zvdb.config.Config{
-        .dimension = 3,
-        .distance_metric = .Euclidean,
-        .index_config = .{ .HNSW = .{
-            .max_connections = 16,
-            .ef_construction = 200,
-            .ef_search = 50,
-        } },
-        .metadata_schema =
-        \\{
-        \\    "type": "object",
-        \\    "properties": {
-        \\        "name": { "type": "string" },
-        \\        "value": { "type": "number" }
-        \\    },
-        \\    "required": ["name", "value"]
-        \\}
-        ,
-        .storage_path = "zvdb_data.bin",
-    };
+    const zvdb_config = zvdb.config.Config.init(allocator, 3, .Euclidean, .{ .HNSW = .{
+        .max_connections = 16,
+        .ef_construction = 200,
+        .ef_search = 50,
+    } }, "zvdb_data.bin");
 
     // Initialize ZVDB
     var db = try zvdb.ZVDB.init(allocator, zvdb_config);
     defer db.deinit();
 
     // Add vectors with metadata
-    const vector1 = [_]f32{ 1.0, 2.0, 3.0 };
-    var metadata1 = zvdb.metadata.json.Metadata.init(allocator);
-    defer metadata1.deinit();
-    try metadata1.set("name", .{ .string = "Point A" });
-    try metadata1.set("value", .{ .float = 42.0 });
+     const vector1 = [_]f32{ 1.0, 2.0, 3.0 };
+     var metadata1 = try zvdb.metadata.MetadataSchema.init(allocator);
+     defer metadata1.deinit();
+     metadata1.name = try allocator.dupe(u8, "Point A");
+     metadata1.value = 42.0;
+     try metadata1.addTag("tag1");
+     try metadata1.addTag("tag2");
 
-    const id1 = try db.add(&vector1, metadata1);
-    std.debug.print("Added vector with ID: {}\n", .{id1});
+     const id1 = try db.add(&vector1, metadata1);
+     std.debug.print("Added vector with ID: {}\n", .{id1});
 
-    const vector2 = [_]f32{ 4.0, 5.0, 6.0 };
-    var metadata2 = zvdb.metadata.json.Metadata.init(allocator);
-    defer metadata2.deinit();
-    try metadata2.set("name", .{ .string = "Point B" });
-    try metadata2.set("value", .{ .float = 73.0 });
+     const vector2 = [_]f32{ 4.0, 5.0, 6.0 };
+     var metadata2 = try zvdb.metadata.MetadataSchema.init(allocator);
+     defer metadata2.deinit();
+     metadata2.name = try allocator.dupe(u8, "Point B");
+     metadata2.value = 73.0;
+     try metadata2.addTag("tag3");
 
-    const id2 = try db.add(&vector2, metadata2);
-    std.debug.print("Added vector with ID: {}\n", .{id2});
+     const id2 = try db.add(&vector2, metadata2);
+     std.debug.print("Added vector with ID: {}\n", .{id2});
 
     // Perform a search
     const query = [_]f32{ 2.0, 3.0, 4.0 };
@@ -66,18 +54,31 @@ pub fn main() !void {
     for (search_results) |result| {
         std.debug.print("  ID: {}, Distance: {d:.4}\n", .{ result.id, result.distance });
         if (result.metadata) |md| {
-            const name = md.get("name").?.string;
-            const value = md.get("value").?.float;
-            std.debug.print("    Metadata: name={s}, value={d:.2}\n", .{ name, value });
+            if (md.name) |name| {
+                std.debug.print("    Name: {s}\n", .{name});
+            }
+            if (md.value) |value| {
+                std.debug.print("    Value: {d:.2}\n", .{value});
+            }
+            if (md.tags.items.len > 0) {
+                const tags = md.tags.items;
+                std.debug.print("    Tags: ", .{});
+                for (tags) |tag| {
+                    std.debug.print("{s} ", .{tag});
+                }
+                std.debug.print("\n", .{});
+            }
+        } else {
+            std.debug.print("    No metadata\n", .{});
         }
     }
 
     // Update a vector and its metadata
     const updated_vector = [_]f32{ 1.5, 2.5, 3.5 };
-    var updated_metadata = zvdb.metadata.json.Metadata.init(allocator);
+    var updated_metadata = try zvdb.metadata.MetadataSchema.init(allocator);
     defer updated_metadata.deinit();
-    try updated_metadata.set("name", .{ .string = "Updated Point A" });
-    try updated_metadata.set("value", .{ .float = 50.0 });
+    updated_metadata.name = try allocator.dupe(u8, "Updated Point A");
+    updated_metadata.value = 50.0;
 
     try db.update(id1, &updated_vector, updated_metadata);
     std.debug.print("Updated vector with ID: {}\n", .{id1});
@@ -98,15 +99,20 @@ pub fn main() !void {
 
     // Perform a search on the loaded database
     const loaded_search_results = try loaded_db.search(&query, 2);
-    defer allocator.free(loaded_search_results);
+    defer {
+        for (loaded_search_results) |*result| {
+            result.deinit();
+        }
+        allocator.free(loaded_search_results);
+    }
 
     std.debug.print("Search results after loading:\n", .{});
     for (loaded_search_results) |result| {
         std.debug.print("  ID: {}, Distance: {d:.4}\n", .{ result.id, result.distance });
         if (result.metadata) |md| {
-            const name = md.get("name").?.string;
-            const value = md.get("value").?.float;
-            std.debug.print("    Metadata: name={s}, value={d:.2}\n", .{ name, value });
+            std.debug.print("    Metadata: name={s}, value={d:.2}\n", .{ md.name orelse "N/A", md.value orelse 0 });
+        } else {
+            std.debug.print("    Metadata: None\n", .{});
         }
     }
 }

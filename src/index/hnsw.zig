@@ -6,6 +6,7 @@ const AutoHashMap = std.AutoHashMap;
 
 const distance = @import("../distance/distance.zig");
 const DistanceMetric = distance.DistanceMetric;
+const metadata = @import("../metadata.zig");
 
 pub const HNSWConfig = struct {
     max_connections: usize,
@@ -17,14 +18,16 @@ const Node = struct {
     id: u64,
     vector: []f32,
     connections: ArrayList(u64),
+    metadata: []u8,
 
-    fn init(allocator: Allocator, id: u64, vector: []const f32) !*Node {
+    fn init(allocator: Allocator, id: u64, vector: []const f32, metadata_bytes: []const u8) !*Node {
         const node = try allocator.create(Node);
         errdefer allocator.destroy(node);
         node.* = .{
             .id = id,
             .vector = try allocator.dupe(f32, vector),
             .connections = ArrayList(u64).init(allocator),
+            .metadata = try allocator.dupe(u8, metadata_bytes),
         };
         return node;
     }
@@ -32,10 +35,10 @@ const Node = struct {
     fn deinit(self: *Node, allocator: Allocator) void {
         allocator.free(self.vector);
         self.connections.deinit();
+        allocator.free(self.metadata);
         allocator.destroy(self);
     }
 };
-
 pub const HNSW = struct {
     allocator: Allocator,
     nodes: AutoHashMap(u64, *Node),
@@ -49,6 +52,11 @@ pub const HNSW = struct {
     pub const KnnResult = struct {
         id: u64,
         distance: f32,
+        metadata: *metadata.MetadataSchema,
+
+        pub fn deinit(self: *KnnResult) void {
+            self.metadata.deinit();
+        }
     };
 
     pub fn init(allocator: Allocator, config: HNSWConfig, dist_metric: DistanceMetric) !Self {
@@ -72,7 +80,9 @@ pub const HNSW = struct {
 
     pub fn addItem(self: *Self, vector: []const f32) !u64 {
         const new_id: u64 = @intCast(self.nodes.count());
-        const new_node = try Node.init(self.allocator, new_id, vector);
+        const metadata_bytes = try std.json.stringifyAlloc(self.allocator, .{}, .{}); // Empty JSON object as placeholder
+        defer self.allocator.free(metadata_bytes);
+        const new_node = try Node.init(self.allocator, new_id, vector, metadata_bytes);
         errdefer new_node.deinit(self.allocator);
 
         const level = self.randomLevel();
@@ -150,13 +160,10 @@ pub const HNSW = struct {
         // If the deleted node was the entry point, update it
         if (self.entry_point) |entry_point| {
             if (entry_point == id) {
-                self.entry_point = if (self.nodes.count() > 0)
-                    blk: {
-                        var it = self.nodes.keyIterator();
-                        break :blk if (it.next()) |key_ptr| key_ptr.* else null;
-                    }
-                else
-                    null;
+                self.entry_point = if (self.nodes.count() > 0) blk: {
+                    var it = self.nodes.keyIterator();
+                    break :blk if (it.next()) |key_ptr| key_ptr.* else null;
+                } else null;
             }
         }
 
@@ -238,9 +245,10 @@ pub const HNSW = struct {
 
             var node = try self.allocator.create(Node);
             node.* = Node{
-                .id = id,
-                .vector = vector,
-                .connections = ArrayList(u64).init(self.allocator),
+                .id = node.id,
+                .vector = node.vector,
+                .connections = node.connections,
+                .metadata = node.metadata,
             };
 
             const connection_count = try reader.readInt(usize, .little);
@@ -302,9 +310,11 @@ pub const HNSW = struct {
 
         const result = try self.allocator.alloc(KnnResult, @min(k, neighbors.len));
         for (neighbors[0..@min(k, neighbors.len)], 0..) |id, i| {
+            const node = self.nodes.get(id).?;
             result[i] = .{
                 .id = id,
-                .distance = distance.getDistanceFunction(self.distance_metric)(query, self.nodes.get(id).?.*.vector),
+                .distance = distance.getDistanceFunction(self.distance_metric)(query, node.vector),
+                .metadata = try metadata.MetadataSchema.deserialize(self.allocator, node.metadata),
             };
         }
 

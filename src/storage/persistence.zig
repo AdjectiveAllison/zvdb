@@ -4,11 +4,7 @@ const FileFormat = @import("file_format.zig").FileFormat;
 const MemoryStorage = @import("memory.zig").MemoryStorage;
 const ZVDB = @import("../zvdb.zig").ZVDB;
 const index = @import("../index/index.zig");
-
-pub const metadata = struct {
-    pub const schema = @import("../metadata/schema.zig");
-    pub const json = @import("../metadata/json.zig");
-};
+const metadata = @import("../metadata.zig");
 
 pub const Persistence = struct {
     allocator: Allocator,
@@ -38,10 +34,8 @@ pub const Persistence = struct {
             .dimension = @intCast(zvdb.config.dimension),
             .distance_function = @intFromEnum(zvdb.config.distance_metric),
             .index_type = @intFromEnum(zvdb.config.index_config),
-            .metadata_schema_length = @intCast(zvdb.config.metadata_schema.len),
         };
 
-        self.file_format.metadata_schema = try self.allocator.dupe(u8, zvdb.config.metadata_schema);
         self.file_format.vector_count = self.memory_storage.count();
 
         // Prepare vector data
@@ -58,7 +52,13 @@ pub const Persistence = struct {
         while (i < self.file_format.vector_count) : (i += 1) {
             const item = try self.memory_storage.get(i);
             try vector_writer.writeAll(std.mem.sliceAsBytes(item.vector));
-            try metadata_list.appendSlice(item.metadata);
+            if (item.metadata) |md| {
+                const md_bytes = try md.serialize();
+                defer self.allocator.free(md_bytes);
+                try metadata_list.appendSlice(md_bytes);
+            } else {
+                try metadata_list.append(0); // Indicate no metadata
+            }
         }
 
         self.file_format.metadata = try metadata_list.toOwnedSlice();
@@ -111,45 +111,35 @@ pub const Persistence = struct {
             // Add cases for other index types here
         };
 
-        // Update the metadata schema
-        zvdb.metadata_schema.deinit();
-        zvdb.metadata_schema = try metadata.schema.Schema.init(self.allocator, self.file_format.metadata_schema);
-
-        // Update the config's metadata_schema reference
-        var metadata_json = metadata.json.Metadata.init(self.allocator);
-        metadata_json.data = zvdb.metadata_schema.schema;
-        zvdb.config.metadata_schema = try metadata_json.toJsonString();
-
         // Load vectors and metadata into memory storage
-        var vector_stream = std.io.FixedBufferStream([]u8){
-            .buffer = self.file_format.vector_data,
-            .pos = 0,
-        };
+        var vector_stream = std.io.fixedBufferStream(self.file_format.vector_data);
         var vector_reader = vector_stream.reader();
 
-        var metadata_stream = std.io.FixedBufferStream([]u8){
-            .buffer = self.file_format.metadata,
-            .pos = 0,
-        };
+        var metadata_stream = std.io.fixedBufferStream(self.file_format.metadata);
         var metadata_reader = metadata_stream.reader();
 
         var i: u64 = 0;
         while (i < self.file_format.vector_count) : (i += 1) {
             const vector = try self.allocator.alloc(f32, zvdb.config.dimension);
+            errdefer self.allocator.free(vector);
             try vector_reader.readNoEof(std.mem.sliceAsBytes(vector));
 
-            const local_metadata = try self.allocator.alloc(u8, zvdb.config.metadata_schema.len);
-            try metadata_reader.readNoEof(local_metadata);
+            const has_metadata = try metadata_reader.readByte();
+            const md = if (has_metadata == 1) blk: {
+                const metadata_size = try metadata_reader.readInt(u32, .little);
+                const metadata_bytes = try self.allocator.alloc(u8, metadata_size);
+                defer self.allocator.free(metadata_bytes);
+                try metadata_reader.readNoEof(metadata_bytes);
 
-            _ = try self.memory_storage.add(vector, local_metadata);
+                break :blk try metadata.MetadataSchema.deserialize(self.allocator, metadata_bytes);
+            } else null;
+
+            _ = try self.memory_storage.add(vector, md);
         }
 
         // Deserialize index data
-        var index_stream = std.io.FixedBufferStream([]u8){
-            .buffer = self.file_format.index_data,
-            .pos = 0,
-        };
-        var index_reader = index_stream.reader();
+        var index_stream = std.io.fixedBufferStream(self.file_format.index_data);
+        const index_reader = index_stream.reader();
         var any_reader = index_reader.any();
         try zvdb.index.deserialize(&any_reader);
     }

@@ -2,6 +2,7 @@ const std = @import("std");
 const Allocator = std.mem.Allocator;
 const hnsw = @import("hnsw.zig");
 const config = @import("../config.zig");
+const metadata = @import("../metadata.zig");
 
 pub const IndexType = enum {
     HNSW,
@@ -20,12 +21,13 @@ pub const Index = struct {
     const VTable = struct {
         deinitFn: *const fn (ptr: *anyopaque) void,
         addFn: *const fn (ptr: *anyopaque, vector: []const f32) Allocator.Error!u64,
-        searchFn: *const fn (allocator: Allocator, ptr: *anyopaque, query: []const f32, limit: usize) Allocator.Error![]SearchResult,
+        searchFn: *const fn (allocator: Allocator, ptr: *anyopaque, query: []const f32, limit: usize) anyerror![]SearchResult,
         deleteFn: *const fn (ptr: *anyopaque, id: u64) (Allocator.Error || error{NodeNotFound})!void,
         updateFn: *const fn (ptr: *anyopaque, id: u64, vector: []const f32) (Allocator.Error || error{NodeNotFound})!void,
         serializeFn: *const fn (ptr: *anyopaque, writer: *std.io.AnyWriter) anyerror!void,
         deserializeFn: *const fn (ptr: *anyopaque, reader: *std.io.AnyReader) anyerror!void,
     };
+
 
     pub fn deinit(self: *Index) void {
         self.vtable.deinitFn(self.ptr);
@@ -35,7 +37,7 @@ pub const Index = struct {
         return self.vtable.addFn(self.ptr, vector);
     }
 
-    pub fn search(self: *Index, allocator: std.mem.Allocator, query: []const f32, limit: usize) Allocator.Error![]SearchResult {
+    pub fn search(self: *Index, allocator: std.mem.Allocator, query: []const f32, limit: usize) anyerror![]SearchResult {
         return self.vtable.searchFn(allocator, self.ptr, query, limit);
     }
 
@@ -51,7 +53,7 @@ pub const Index = struct {
         return self.vtable.serializeFn(self.ptr, writer);
     }
 
-    pub fn deserialize(self: *Index, reader: *std.io.AnyReader) !void{
+    pub fn deserialize(self: *Index, reader: *std.io.AnyReader) !void {
         return self.vtable.deserializeFn(self.ptr, reader);
     }
 };
@@ -59,6 +61,11 @@ pub const Index = struct {
 pub const SearchResult = struct {
     id: u64,
     similarity: f32,
+    metadata: *metadata.MetadataSchema,
+
+    pub fn deinit(self: *SearchResult, allocator: Allocator) void {
+        self.metadata.deinit(allocator);
+    }
 };
 
 pub fn createIndex(allocator: Allocator, index_config: IndexConfig) Allocator.Error!Index {
@@ -98,16 +105,22 @@ fn addHNSW(ptr: *anyopaque, vector: []const f32) Allocator.Error!u64 {
     return self.addItem(vector);
 }
 
-fn searchHNSW(allocator: std.mem.Allocator, ptr: *anyopaque, query: []const f32, limit: usize) Allocator.Error![]SearchResult {
+fn searchHNSW(allocator: std.mem.Allocator, ptr: *anyopaque, query: []const f32, limit: usize) ![]SearchResult {
     const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
     const results = try self.searchKnn(query, limit);
-    defer allocator.free(results);
+    defer {
+        for (results) |*result| {
+            result.deinit();
+        }
+        allocator.free(results);
+    }
 
     var search_results = try allocator.alloc(SearchResult, results.len);
     for (results, 0..) |result, i| {
         search_results[i] = SearchResult{
             .id = result.id,
-            .similarity = 1.0 - result.distance, // Convert distance to similarity
+            .similarity = 1.0 - result.distance,
+            .metadata = result.metadata,
         };
     }
     return search_results;

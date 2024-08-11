@@ -1,11 +1,12 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
+const metadata = @import("../metadata.zig");
 
 pub const MemoryStorage = struct {
     allocator: Allocator,
     vectors: ArrayList([]f32),
-    metadata: ArrayList([]u8),
+    metadata: ArrayList(?*metadata.MetadataSchema),
 
     const Self = @This();
 
@@ -13,7 +14,7 @@ pub const MemoryStorage = struct {
         return Self{
             .allocator = allocator,
             .vectors = ArrayList([]f32).init(allocator),
-            .metadata = ArrayList([]u8).init(allocator),
+            .metadata = ArrayList(?*metadata.MetadataSchema).init(allocator),
         };
     }
 
@@ -24,26 +25,22 @@ pub const MemoryStorage = struct {
         self.vectors.deinit();
 
         for (self.metadata.items) |md| {
-            self.allocator.free(md);
+            if (md) |m| {
+                m.deinit();
+            }
         }
         self.metadata.deinit();
     }
 
-    pub fn add(self: *Self, vector: []const f32, metadata: ?[]const u8) !u64 {
+    pub fn add(self: *Self, vector: []const f32, md: ?*metadata.MetadataSchema) !u64 {
         const new_vector = try self.allocator.dupe(f32, vector);
         try self.vectors.append(new_vector);
-
-        if (metadata) |md| {
-            const new_metadata = try self.allocator.dupe(u8, md);
-            try self.metadata.append(new_metadata);
-        } else {
-            try self.metadata.append(&[_]u8{});
-        }
+        try self.metadata.append(md);
 
         return self.vectors.items.len - 1;
     }
 
-    pub fn get(self: *Self, id: u64) !struct { vector: []const f32, metadata: []const u8 } {
+    pub fn get(self: *Self, id: u64) !struct { vector: []const f32, metadata: ?*metadata.MetadataSchema } {
         if (id >= self.vectors.items.len) {
             return error.IdNotFound;
         }
@@ -54,7 +51,7 @@ pub const MemoryStorage = struct {
         };
     }
 
-    pub fn update(self: *Self, id: u64, vector: []const f32, metadata: ?[]const u8) !void {
+    pub fn update(self: *Self, id: u64, vector: []const f32, md: ?*metadata.MetadataSchema) !void {
         if (id >= self.vectors.items.len) {
             return error.IdNotFound;
         }
@@ -62,10 +59,10 @@ pub const MemoryStorage = struct {
         self.allocator.free(self.vectors.items[id]);
         self.vectors.items[id] = try self.allocator.dupe(f32, vector);
 
-        if (metadata) |md| {
-            self.allocator.free(self.metadata.items[id]);
-            self.metadata.items[id] = try self.allocator.dupe(u8, md);
+        if (self.metadata.items[id]) |old_md| {
+            old_md.deinit();
         }
+        self.metadata.items[id] = md;
     }
 
     pub fn delete(self: *Self, id: u64) !void {
@@ -76,7 +73,9 @@ pub const MemoryStorage = struct {
         self.allocator.free(self.vectors.items[id]);
         _ = self.vectors.orderedRemove(id);
 
-        self.allocator.free(self.metadata.items[id]);
+        if (self.metadata.items[id]) |md| {
+            md.deinit();
+        }
         _ = self.metadata.orderedRemove(id);
     }
 
