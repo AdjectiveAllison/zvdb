@@ -79,9 +79,10 @@ pub const HNSW = struct {
         self.nodes.deinit();
     }
 
-    pub fn addItem(self: *Self, vector: []const f32, md: *const metadata.MetadataSchema) !u64 {
+    pub fn addItem(self: *Self, vector: []const f32, md: ?*const metadata.MetadataSchema) !u64 {
         const new_id: u64 = @intCast(self.nodes.count());
-        const new_node = try Node.init(self.allocator, new_id, vector, md);
+        const new_metadata = if (md) |m| try m.clone(self.allocator) else try metadata.MetadataSchema.init(self.allocator);
+        const new_node = try Node.init(self.allocator, new_id, vector, new_metadata);
         errdefer new_node.deinit(self.allocator);
 
         const level = self.randomLevel();
@@ -207,7 +208,9 @@ pub const HNSW = struct {
             for (node.connections.items) |connection| {
                 try writer.writeInt(u64, connection, .little);
             }
-            try node.metadata.serialize(writer);
+            const serialized_metadata = try node.metadata.serialize();
+            defer self.allocator.free(serialized_metadata);
+            try writer.writeAll(serialized_metadata);
         }
         std.debug.print("HNSW serialization complete\n", .{});
     }
@@ -281,7 +284,11 @@ pub const HNSW = struct {
 
             var metadata_buffer = std.ArrayList(u8).init(self.allocator);
             defer metadata_buffer.deinit();
-            try metadata.MetadataSchema.deserialize(self.allocator, reader, &metadata_buffer);
+            const metadata_len = try reader.readInt(u32, .little);
+            metadata_buffer.clearRetainingCapacity();
+            try metadata_buffer.appendNTimes(0, metadata_len);
+            _ = try reader.readAll(metadata_buffer.items);
+            const node_metadata = try metadata.MetadataSchema.deserialize(self.allocator, metadata_buffer.items);
             const node_metadata = try metadata.MetadataSchema.fromBuffer(self.allocator, metadata_buffer.items);
             var node = try Node.init(self.allocator, id, vector, node_metadata);
             node.connections = connections;
