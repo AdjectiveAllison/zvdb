@@ -31,17 +31,14 @@ pub const ZVDB = struct {
             .allocator = allocator,
             .index = undefined,
             .config = zvdb_config,
-            .metadata_schema = undefined,
-            .persistence = undefined,
-            .memory_storage = undefined,
+            .metadata_schema = try metadata.schema.Schema.init(allocator, zvdb_config.metadata_schema),
+            .persistence = storage.Persistence.init(allocator),
+            .memory_storage = memory.MemoryStorage.init(allocator),
         };
 
         errdefer self.deinit();
 
         self.index = try index.createIndex(allocator, zvdb_config.index_config);
-        self.metadata_schema = try metadata.schema.Schema.init(allocator, zvdb_config.metadata_schema);
-        self.persistence = storage.Persistence.init(allocator);
-        self.memory_storage = memory.MemoryStorage.init(allocator);
 
         return self;
     }
@@ -51,6 +48,7 @@ pub const ZVDB = struct {
         self.metadata_schema.deinit();
         self.persistence.deinit();
         self.memory_storage.deinit();
+        self.config.deinit(self.allocator);
         self.allocator.destroy(self);
     }
 
@@ -81,31 +79,17 @@ pub const ZVDB = struct {
 
         var search_results = try self.allocator.alloc(SearchResult, results.len);
         errdefer self.allocator.free(search_results);
-        // defer for (search_results) |*result| {
-        //     if (result.metadata) |*md| {
-        //         md.deinit();
-        //     }
-        // };
 
         for (results, 0..) |result, i| {
             const stored_item = try self.memory_storage.get(result.id);
-            var parsed_metadata: ?std.json.Parsed(json.Value) = null;
-
-            if (stored_item.metadata.len > 0) {
-                parsed_metadata = try std.json.parseFromSlice(json.Value, self.allocator, stored_item.metadata, .{});
-            }
-
-            var result_metadata: ?metadata.json.Metadata = null;
-            if (parsed_metadata) |p| {
-                const cloned_value = try metadata.schema.cloneValue(self.allocator, p.value);
-                errdefer metadata.schema.deinitValue(self.allocator, cloned_value);
-                result_metadata = metadata.json.Metadata{ .allocator = self.allocator, .data = cloned_value };
-            }
 
             search_results[i] = .{
                 .id = result.id,
                 .distance = 1.0 - result.similarity,
-                .metadata = result_metadata,
+                .metadata = if (stored_item.metadata.len > 0)
+                    try metadata.json.Metadata.fromJsonString(self.allocator, stored_item.metadata)
+                else
+                    null,
             };
         }
 
@@ -157,4 +141,10 @@ pub const SearchResult = struct {
     id: u64,
     distance: f32,
     metadata: ?metadata.json.Metadata,
+
+    pub fn deinit(self: *SearchResult) void {
+        if (self.metadata) |*md| {
+            md.deinit();
+        }
+    }
 };

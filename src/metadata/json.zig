@@ -49,14 +49,12 @@ pub const Metadata = struct {
         return string.toOwnedSlice();
     }
 
+    //TODO: This likely needs to be an arena specific allocator otherwise we can't use parseFromSliceLeaky.
     pub fn fromJsonString(allocator: Allocator, json_string: []const u8) !Self {
-        var parser = json.Parser.init(allocator, false);
-        defer parser.deinit();
-
-        const parsed = try parser.parse(json_string);
+        const parsed_value = try json.parseFromSliceLeaky(json.Value, allocator, json_string, .{});
         return Self{
             .allocator = allocator,
-            .data = parsed.value,
+            .data = parsed_value,
         };
     }
 

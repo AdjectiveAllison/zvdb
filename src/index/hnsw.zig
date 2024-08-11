@@ -18,17 +18,21 @@ const Node = struct {
     vector: []f32,
     connections: ArrayList(u64),
 
-    fn init(allocator: Allocator, id: u64, vector: []const f32) !Node {
-        return Node{
+    fn init(allocator: Allocator, id: u64, vector: []const f32) !*Node {
+        const node = try allocator.create(Node);
+        errdefer allocator.destroy(node);
+        node.* = .{
             .id = id,
             .vector = try allocator.dupe(f32, vector),
             .connections = ArrayList(u64).init(allocator),
         };
+        return node;
     }
 
     fn deinit(self: *Node, allocator: Allocator) void {
         allocator.free(self.vector);
         self.connections.deinit();
+        allocator.destroy(self);
     }
 };
 
@@ -59,18 +63,16 @@ pub const HNSW = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        var it = self.nodes.valueIterator();
-        while (it.next()) |node| {
-            node.*.deinit(self.allocator);
+        var it = self.nodes.iterator();
+        while (it.next()) |entry| {
+            entry.value_ptr.*.deinit(self.allocator);
         }
         self.nodes.deinit();
     }
 
     pub fn addItem(self: *Self, vector: []const f32) !u64 {
         const new_id: u64 = @intCast(self.nodes.count());
-        const new_node = try self.allocator.create(Node);
-        errdefer self.allocator.destroy(new_node);
-        new_node.* = try Node.init(self.allocator, new_id, vector);
+        const new_node = try Node.init(self.allocator, new_id, vector);
         errdefer new_node.deinit(self.allocator);
 
         const level = self.randomLevel();
@@ -140,10 +142,9 @@ pub const HNSW = struct {
             }
         }
 
-        // Remove the node from the index
+        // Remove the node from the index and free its memory
         if (self.nodes.remove(id)) {
             node.deinit(self.allocator);
-            self.allocator.destroy(node);
         }
 
         // If the deleted node was the entry point, update it
@@ -201,12 +202,15 @@ pub const HNSW = struct {
     }
 
     pub fn deserialize(self: *HNSW, reader: anytype) !void {
-        // Clear existing data
-        self.deinit();
+        self.deinit(); // Clear existing data
         self.nodes = AutoHashMap(u64, *Node).init(self.allocator);
 
-        // Read basic information
-        const node_count = try reader.readInt(usize, .little);
+        const node_count = reader.readInt(usize, .little) catch |err| {
+            if (err == error.EndOfStream) {
+                return error.InvalidOrEmptyFile;
+            }
+            return err;
+        };
         self.max_level = try reader.readInt(usize, .little);
         const has_entry_point = try reader.readByte();
         if (has_entry_point == 1) {

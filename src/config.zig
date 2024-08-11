@@ -37,7 +37,6 @@ pub const Config = struct {
         if (self.storage_path) |path| {
             allocator.free(path);
         }
-        allocator.free(self.metadata_schema);
     }
 };
 

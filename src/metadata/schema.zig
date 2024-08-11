@@ -53,19 +53,37 @@ pub fn cloneValue(allocator: Allocator, value: json.Value) !json.Value {
         .integer => |i| .{ .integer = i },
         .float => |f| .{ .float = f },
         .number_string => |s| .{ .number_string = try allocator.dupe(u8, s) },
-        .string => |s| .{ .string = try allocator.dupe(u8, s) },
+        .string => |s| {
+            const new_str = try allocator.dupe(u8, s);
+            return .{ .string = new_str };
+        },
         .array => |arr| {
             var new_arr = try json.Array.initCapacity(allocator, arr.items.len);
+            errdefer new_arr.deinit();
             for (arr.items) |item| {
-                try new_arr.append(try cloneValue(allocator, item));
+                const new_item = try cloneValue(allocator, item);
+                errdefer deinitValue(allocator, new_item);
+                try new_arr.append(new_item);
             }
             return .{ .array = new_arr };
         },
         .object => |obj| {
             var new_obj = json.ObjectMap.init(allocator);
+            errdefer {
+                var it = new_obj.iterator();
+                while (it.next()) |entry| {
+                    allocator.free(entry.key_ptr.*);
+                    deinitValue(allocator, entry.value_ptr.*);
+                }
+                new_obj.deinit();
+            }
             var it = obj.iterator();
             while (it.next()) |entry| {
-                try new_obj.put(try allocator.dupe(u8, entry.key_ptr.*), try cloneValue(allocator, entry.value_ptr.*));
+                const new_key = try allocator.dupe(u8, entry.key_ptr.*);
+                errdefer allocator.free(new_key);
+                const new_value = try cloneValue(allocator, entry.value_ptr.*);
+                errdefer deinitValue(allocator, new_value);
+                try new_obj.put(new_key, new_value);
             }
             return .{ .object = new_obj };
         },

@@ -5,6 +5,11 @@ const MemoryStorage = @import("memory.zig").MemoryStorage;
 const ZVDB = @import("../zvdb.zig").ZVDB;
 const index = @import("../index/index.zig");
 
+pub const metadata = struct {
+    pub const schema = @import("../metadata/schema.zig");
+    pub const json = @import("../metadata/json.zig");
+};
+
 pub const Persistence = struct {
     allocator: Allocator,
     file_format: FileFormat,
@@ -106,7 +111,14 @@ pub const Persistence = struct {
             // Add cases for other index types here
         };
 
-        zvdb.config.metadata_schema = try self.allocator.dupe(u8, self.file_format.metadata_schema);
+        // Update the metadata schema
+        zvdb.metadata_schema.deinit();
+        zvdb.metadata_schema = try metadata.schema.Schema.init(self.allocator, self.file_format.metadata_schema);
+
+        // Update the config's metadata_schema reference
+        var metadata_json = metadata.json.Metadata.init(self.allocator);
+        metadata_json.data = zvdb.metadata_schema.schema;
+        zvdb.config.metadata_schema = try metadata_json.toJsonString();
 
         // Load vectors and metadata into memory storage
         var vector_stream = std.io.FixedBufferStream([]u8){
@@ -126,10 +138,10 @@ pub const Persistence = struct {
             const vector = try self.allocator.alloc(f32, zvdb.config.dimension);
             try vector_reader.readNoEof(std.mem.sliceAsBytes(vector));
 
-            const metadata = try self.allocator.alloc(u8, zvdb.config.metadata_schema.len);
-            try metadata_reader.readNoEof(metadata);
+            const local_metadata = try self.allocator.alloc(u8, zvdb.config.metadata_schema.len);
+            try metadata_reader.readNoEof(local_metadata);
 
-            _ = try self.memory_storage.add(vector, metadata);
+            _ = try self.memory_storage.add(vector, local_metadata);
         }
 
         // Deserialize index data
