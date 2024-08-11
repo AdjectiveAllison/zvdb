@@ -81,7 +81,7 @@ pub const HNSW = struct {
 
     pub fn addItem(self: *Self, vector: []const f32, md: ?*const metadata.MetadataSchema) !u64 {
         const new_id: u64 = @intCast(self.nodes.count());
-        const new_metadata = if (md) |m| try m.clone(self.allocator) else try metadata.MetadataSchema.init(self.allocator);
+        const new_metadata = if (md) |m| try m.clone(self.allocator) else metadata.MetadataSchema.init(self.allocator);
         const new_node = try Node.init(self.allocator, new_id, vector, new_metadata);
         errdefer new_node.deinit(self.allocator);
 
@@ -179,7 +179,7 @@ pub const HNSW = struct {
     }
 
     pub fn serialize(self: *HNSW, writer: anytype) !void {
-        std.debug.print("Serializing HNSW: node count={}, max_level={}\n", .{self.nodes.count(), self.max_level});
+        std.debug.print("Serializing HNSW: node count={}, max_level={}\n", .{ self.nodes.count(), self.max_level });
 
         try writer.writeInt(u32, @intCast(self.nodes.count()), .little);
         try writer.writeInt(u32, @intCast(self.max_level), .little);
@@ -198,7 +198,7 @@ pub const HNSW = struct {
             const id = entry.key_ptr.*;
             const node = entry.value_ptr.*;
 
-            std.debug.print("Serializing node {}: vector len={}, connections={}\n", .{id, node.vector.len, node.connections.items.len});
+            std.debug.print("Serializing node {}: vector len={}, connections={}\n", .{ id, node.vector.len, node.connections.items.len });
             try writer.writeInt(u64, id, .little);
             try writer.writeInt(u32, @intCast(node.vector.len), .little);
             for (node.vector) |value| {
@@ -219,10 +219,10 @@ pub const HNSW = struct {
         const node_count = try reader.readInt(u32, .little);
         self.max_level = try reader.readInt(u32, .little);
 
-        std.debug.print("HNSW Deserialization: node_count={}, max_level={}\n", .{node_count, self.max_level});
+        std.debug.print("HNSW Deserialization: node_count={}, max_level={}\n", .{ node_count, self.max_level });
 
         if (node_count > 1_000_000 or self.max_level > 100) {
-            std.debug.print("Invalid data: node_count={}, max_level={}\n", .{node_count, self.max_level});
+            std.debug.print("Invalid data: node_count={}, max_level={}\n", .{ node_count, self.max_level });
             return error.InvalidData;
         }
 
@@ -242,7 +242,7 @@ pub const HNSW = struct {
         while (i < node_count) : (i += 1) {
             const id = try reader.readInt(u64, .little);
             const vector_len = try reader.readInt(u32, .little);
-            std.debug.print("Deserializing node {}: vector len={}\n", .{id, vector_len});
+            std.debug.print("Deserializing node {}: vector len={}\n", .{ id, vector_len });
 
             if (vector_len > 1_000_000) {
                 return error.InvalidVectorLength;
@@ -260,7 +260,7 @@ pub const HNSW = struct {
             }
 
             const connections_len = try reader.readInt(u32, .little);
-            std.debug.print("Node {} connections: {}\n", .{id, connections_len});
+            std.debug.print("Node {} connections: {}\n", .{ id, connections_len });
 
             if (connections_len > 1_000_000) {
                 return error.InvalidConnectionsLength;
@@ -284,12 +284,10 @@ pub const HNSW = struct {
 
             var metadata_buffer = std.ArrayList(u8).init(self.allocator);
             defer metadata_buffer.deinit();
-            const metadata_len = try reader.readInt(u32, .little);
             metadata_buffer.clearRetainingCapacity();
             try metadata_buffer.appendNTimes(0, metadata_len);
             _ = try reader.readAll(metadata_buffer.items);
-            const node_metadata = try metadata.MetadataSchema.deserialize(self.allocator, metadata_buffer.items);
-            const node_metadata = try metadata.MetadataSchema.fromBuffer(self.allocator, metadata_buffer.items);
+            const node_metadata = metadata.MetadataSchema.deserialize(self.allocator, metadata_buffer.items);
             var node = try Node.init(self.allocator, id, vector, node_metadata);
             node.connections = connections;
             try self.nodes.put(id, node);
