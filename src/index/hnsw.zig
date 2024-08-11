@@ -5,6 +5,7 @@ const ArrayList = std.ArrayList;
 const AutoHashMap = std.AutoHashMap;
 
 const distance = @import("../distance/distance.zig");
+const DistanceMetric = distance.DistanceMetric;
 
 pub const HNSWConfig = struct {
     max_connections: usize,
@@ -40,18 +41,18 @@ pub const HNSW = struct {
     entry_point: ?u64,
     max_level: usize,
     config: HNSWConfig,
-    distance_fn: distance.DistanceFunction,
+    distance_metric: DistanceMetric,
 
     const Self = @This();
 
-    pub fn init(allocator: Allocator, config: HNSWConfig, dist_fn: distance.DistanceFunction) !Self {
+    pub fn init(allocator: Allocator, config: HNSWConfig, dist_metric: DistanceMetric) !Self {
         return Self{
             .allocator = allocator,
             .nodes = AutoHashMap(u64, *Node).init(allocator),
             .entry_point = null,
             .max_level = 0,
             .config = config,
-            .distance_fn = dist_fn,
+            .distance_metric = dist_metric,
         };
     }
 
@@ -80,7 +81,7 @@ pub const HNSW = struct {
 
         // Find entry point
         var curr_node_id = self.entry_point.?;
-        var curr_dist = self.distance_fn(vector, self.nodes.get(curr_node_id).?.vector);
+        var curr_dist = distance.getDistanceFunction(self.distance_metric)(vector, self.nodes.get(curr_node_id).?.vector);
 
         // Traverse the layers
         var lc = self.max_level;
@@ -89,7 +90,7 @@ pub const HNSW = struct {
             while (changed) {
                 changed = false;
                 for (self.nodes.get(curr_node_id).?.connections.items) |neighbor_id| {
-                    const neighbor_dist = self.distance_fn(vector, self.nodes.get(neighbor_id).?.vector);
+                    const neighbor_dist = distance.getDistanceFunction(self.distance_metric)(vector, self.nodes.get(neighbor_id).?.vector);
                     if (neighbor_dist < curr_dist) {
                         curr_node_id = neighbor_id;
                         curr_dist = neighbor_dist;
@@ -125,7 +126,7 @@ pub const HNSW = struct {
         }
 
         var curr_node_id = self.entry_point.?;
-        var curr_dist = self.distance_fn(query, self.nodes.get(curr_node_id).?.vector);
+        var curr_dist = distance.getDistanceFunction(self.distance_metric)(query, self.nodes.get(curr_node_id).?.vector);
 
         var lc = self.max_level;
         while (lc > 0) : (lc -= 1) {
@@ -133,7 +134,7 @@ pub const HNSW = struct {
             while (changed) {
                 changed = false;
                 for (self.nodes.get(curr_node_id).?.connections.items) |neighbor_id| {
-                    const neighbor_dist = self.distance_fn(query, self.nodes.get(neighbor_id).?.vector);
+                    const neighbor_dist = distance.getDistanceFunction(self.distance_metric)(query, self.nodes.get(neighbor_id).?.vector);
                     if (neighbor_dist < curr_dist) {
                         curr_node_id = neighbor_id;
                         curr_dist = neighbor_dist;
@@ -170,8 +171,8 @@ pub const HNSW = struct {
         try results.add(entry_point);
 
         while (candidates.removeOrNull()) |curr_id| {
-            const curr_dist = self.distance_fn(query, self.nodes.get(curr_id).?.vector);
-            if (results.count() >= ef and curr_dist > self.distance_fn(query, self.nodes.get(results.peek().?).?.vector)) {
+            const curr_dist = distance.getDistanceFunction(self.distance_metric)(query, self.nodes.get(curr_id).?.vector);
+            if (results.count() >= ef and curr_dist > distance.getDistanceFunction(self.distance_metric)(query, self.nodes.get(results.peek().?).?.vector)) {
                 break;
             }
 
@@ -182,9 +183,9 @@ pub const HNSW = struct {
             for (layer_connections) |neighbor_id| {
                 if (!visited.contains(neighbor_id)) {
                     try visited.put(neighbor_id, {});
-                    const neighbor_dist = self.distance_fn(query, self.nodes.get(neighbor_id).?.vector);
+                    const neighbor_dist = distance.getDistanceFunction(self.distance_metric)(query, self.nodes.get(neighbor_id).?.vector);
 
-                    if (results.count() < ef or neighbor_dist < self.distance_fn(query, self.nodes.get(results.peek().?).?.vector)) {
+                    if (results.count() < ef or neighbor_dist < distance.getDistanceFunction(self.distance_metric)(query, self.nodes.get(results.peek().?).?.vector)) {
                         try candidates.add(neighbor_id);
                         try results.add(neighbor_id);
 
@@ -244,8 +245,9 @@ pub const HNSW = struct {
     }
 
     fn distanceComparator(self: *const Self, a: u64, b: u64) std.math.Order {
-        const dist_a = self.distance_fn(self.nodes.get(a).?.vector, self.nodes.get(b).?.vector);
-        const dist_b = self.distance_fn(self.nodes.get(a).?.vector, self.nodes.get(b).?.vector);
+        const dist_fn = distance.getDistanceFunction(self.distance_metric);
+        const dist_a = dist_fn(self.nodes.get(a).?.vector, self.nodes.get(b).?.vector);
+        const dist_b = dist_fn(self.nodes.get(a).?.vector, self.nodes.get(b).?.vector);
         return std.math.order(dist_a, dist_b);
     }
 };
