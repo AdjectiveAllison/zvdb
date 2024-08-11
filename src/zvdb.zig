@@ -16,13 +16,12 @@ pub const ZVDB = struct {
 
     const Self = @This();
 
-    // TODO: function parameter `config` shadows decleration of config up top. This is a code smell.
-    pub fn init(allocator: Allocator, config: config.Config) !Self {
+    pub fn init(allocator: Allocator, zvdb_config: config.Config) !Self {
         var zvdb = Self{
             .allocator = allocator,
-            .index = try index.createIndex(allocator, config.index_config),
-            .config = config,
-            .metadata_schema = try metadata.Schema.init(allocator, config.metadata_schema),
+            .index = try index.createIndex(allocator, zvdb_config.index_config),
+            .config = zvdb_config,
+            .metadata_schema = try metadata.Schema.init(allocator, zvdb_config.metadata_schema),
         };
         return zvdb;
     }
