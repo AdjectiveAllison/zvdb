@@ -43,6 +43,8 @@ pub const Metadata = struct {
 
     pub fn toJsonString(self: *const Self) ![]u8 {
         var string = std.ArrayList(u8).init(self.allocator);
+        defer string.deinit();
+
         try json.stringify(self.data, .{}, string.writer());
         return string.toOwnedSlice();
     }

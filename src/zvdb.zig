@@ -29,12 +29,19 @@ pub const ZVDB = struct {
 
         self.* = .{
             .allocator = allocator,
-            .index = try index.createIndex(allocator, zvdb_config.index_config),
+            .index = undefined,
             .config = zvdb_config,
-            .metadata_schema = try metadata.schema.Schema.init(allocator, zvdb_config.metadata_schema),
-            .persistence = storage.Persistence.init(allocator),
-            .memory_storage = memory.MemoryStorage.init(allocator),
+            .metadata_schema = undefined,
+            .persistence = undefined,
+            .memory_storage = undefined,
         };
+
+        errdefer self.deinit();
+
+        self.index = try index.createIndex(allocator, zvdb_config.index_config);
+        self.metadata_schema = try metadata.schema.Schema.init(allocator, zvdb_config.metadata_schema);
+        self.persistence = storage.Persistence.init(allocator);
+        self.memory_storage = memory.MemoryStorage.init(allocator);
 
         return self;
     }
@@ -44,6 +51,7 @@ pub const ZVDB = struct {
         self.metadata_schema.deinit();
         self.persistence.deinit();
         self.memory_storage.deinit();
+        self.allocator.destroy(self);
     }
 
     pub fn add(self: *Self, vector: []const f32, new_metadata: ?metadata.json.Metadata) !u64 {
@@ -69,19 +77,35 @@ pub const ZVDB = struct {
         }
 
         const results = try self.index.search(self.allocator, query, limit);
+        defer self.allocator.free(results);
 
         var search_results = try self.allocator.alloc(SearchResult, results.len);
+        errdefer self.allocator.free(search_results);
+        // defer for (search_results) |*result| {
+        //     if (result.metadata) |*md| {
+        //         md.deinit();
+        //     }
+        // };
+
         for (results, 0..) |result, i| {
             const stored_item = try self.memory_storage.get(result.id);
-            const parsed_metadata = if (stored_item.metadata.len > 0)
-                try std.json.parseFromSlice(json.Value, self.allocator, stored_item.metadata, .{})
-            else
-                null;
+            var parsed_metadata: ?std.json.Parsed(json.Value) = null;
+
+            if (stored_item.metadata.len > 0) {
+                parsed_metadata = try std.json.parseFromSlice(json.Value, self.allocator, stored_item.metadata, .{});
+            }
+
+            var result_metadata: ?metadata.json.Metadata = null;
+            if (parsed_metadata) |p| {
+                const cloned_value = try metadata.schema.cloneValue(self.allocator, p.value);
+                errdefer metadata.schema.deinitValue(self.allocator, cloned_value);
+                result_metadata = metadata.json.Metadata{ .allocator = self.allocator, .data = cloned_value };
+            }
 
             search_results[i] = .{
                 .id = result.id,
-                .distance = 1.0 - result.similarity, // Convert similarity back to distance
-                .metadata = if (parsed_metadata) |p| metadata.json.Metadata{ .allocator = self.allocator, .data = p.value } else null,
+                .distance = 1.0 - result.similarity,
+                .metadata = result_metadata,
             };
         }
 

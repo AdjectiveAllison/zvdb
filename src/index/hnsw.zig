@@ -71,6 +71,7 @@ pub const HNSW = struct {
         const new_node = try self.allocator.create(Node);
         errdefer self.allocator.destroy(new_node);
         new_node.* = try Node.init(self.allocator, new_id, vector);
+        errdefer new_node.deinit(self.allocator);
 
         const level = self.randomLevel();
 
@@ -218,7 +219,13 @@ pub const HNSW = struct {
         var i: usize = 0;
         while (i < node_count) : (i += 1) {
             const id = try reader.readInt(u64, .little);
-            const vector_len = try reader.readInt(usize, .little);
+            const vector_len = reader.readInt(usize, .little) catch |err| {
+                if (err == error.EndOfStream) {
+                    // Handle the case where the file is empty or we've reached the end
+                    return error.InvalidOrEmptyFile;
+                }
+                return err;
+            };
             const vector = try self.allocator.alloc(f32, vector_len);
             for (vector) |*value| {
                 const bits = try reader.readInt(u32, .little);
@@ -313,6 +320,7 @@ pub const HNSW = struct {
 
     fn searchLayer(self: *Self, query: []const f32, entry_point: u64, ef: usize, layer: usize) ![]u64 {
         var candidates = std.PriorityQueue(u64, *const Self, distanceComparator).init(self.allocator, self);
+        defer candidates.deinit();
         var visited = AutoHashMap(u64, void).init(self.allocator);
         defer visited.deinit();
 
@@ -320,6 +328,7 @@ pub const HNSW = struct {
         try visited.put(entry_point, {});
 
         var results = std.PriorityQueue(u64, *const Self, distanceComparator).init(self.allocator, self);
+        defer results.deinit();
         try results.add(entry_point);
 
         while (candidates.removeOrNull()) |curr_id| {
@@ -350,6 +359,8 @@ pub const HNSW = struct {
         }
 
         const result = try self.allocator.alloc(u64, results.count());
+        errdefer self.allocator.free(result);
+
         var i: usize = 0;
         while (results.removeOrNull()) |id| {
             result[i] = id;
