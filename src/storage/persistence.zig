@@ -106,10 +106,12 @@ pub const Persistence = struct {
                 error.MetadataAllocationFailed => std.debug.print("Failed to allocate memory for metadata. This might be due to insufficient memory or an incorrect metadata size in the file.\n", .{}),
                 error.EndOfStream => std.debug.print("Unexpected end of file while reading. The file might be truncated.\n", .{}),
                 error.InputOutput => std.debug.print("I/O error occurred while reading the file.\n", .{}),
+                error.IncompleteRead => std.debug.print("Incomplete read of metadata. The file might be corrupted or truncated.\n", .{}),
                 else => std.debug.print("An unexpected error occurred: {}\n", .{err}),
             }
             return err;
         };
+        std.debug.print("File format read successfully\n", .{});
         self.validateFileHeader() catch |err| {
             std.debug.print("Error validating file header: {}\n", .{err});
             return err;
