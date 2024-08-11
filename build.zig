@@ -13,17 +13,10 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(lib);
 
-    // Tests
-    const main_tests = b.addTest(.{
+    // Create a module for the library
+    const lib_module = b.addModule("zvdb", .{
         .root_source_file = b.path("src/zvdb.zig"),
-        .target = target,
-        .optimize = optimize,
     });
-
-    const run_main_tests = b.addRunArtifact(main_tests);
-
-    const test_step = b.step("test", "Run library tests");
-    test_step.dependOn(&run_main_tests.step);
 
     // Add unit tests
     const unit_tests = b.addTest(.{
@@ -52,7 +45,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    basic_example.addModule("zvdb", lib.getModule("zvdb"));
+    basic_example.root_module.addImport("zvdb", lib_module);
     b.installArtifact(basic_example);
 
     const advanced_example = b.addExecutable(.{
@@ -61,7 +54,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    advanced_example.addModule("zvdb", lib.getModule("zvdb"));
+    advanced_example.root_module.addImport("zvdb", lib_module);
     b.installArtifact(advanced_example);
 
     // Benchmarks
@@ -71,7 +64,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    index_benchmark.addModule("zvdb", lib.getModule("zvdb"));
+    index_benchmark.root_module.addImport("zvdb", lib_module);
     b.installArtifact(index_benchmark);
 
     const search_benchmark = b.addExecutable(.{
@@ -80,7 +73,7 @@ pub fn build(b: *std.Build) void {
         .target = target,
         .optimize = optimize,
     });
-    search_benchmark.addModule("zvdb", lib.getModule("zvdb"));
+    search_benchmark.root_module.addImport("zvdb", lib_module);
     b.installArtifact(search_benchmark);
 
     // Run benchmarks step
