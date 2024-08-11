@@ -54,7 +54,10 @@ pub const SearchResult = struct {
 pub fn createIndex(allocator: Allocator, index_config: IndexConfig) Allocator.Error!Index {
     switch (index_config) {
         .HNSW => |hnsw_config| {
-            const hnsw_index = try hnsw.HNSW.init(allocator, hnsw_config, null); // Assuming distance function is set elsewhere
+            const hnsw_ptr = try allocator.create(hnsw.HNSW);
+            errdefer allocator.destroy(hnsw_ptr);
+            hnsw_ptr.* = try hnsw.HNSW.init(allocator, hnsw_config, .Euclidean); // Use a default metric for now
+
             const vtable = &.{
                 .deinitFn = deinitHNSW,
                 .addFn = addHNSW,
@@ -62,7 +65,7 @@ pub fn createIndex(allocator: Allocator, index_config: IndexConfig) Allocator.Er
                 .deleteFn = deleteHNSW,
                 .updateFn = updateHNSW,
             };
-            return Index{ .ptr = hnsw_index, .vtable = vtable };
+            return Index{ .ptr = hnsw_ptr, .vtable = vtable };
         },
         // Add cases for other index types here in the future
     }
@@ -71,11 +74,14 @@ pub fn createIndex(allocator: Allocator, index_config: IndexConfig) Allocator.Er
 fn deinitHNSW(ptr: *anyopaque) void {
     const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
     self.deinit();
+    // Note: We need to free the memory allocated for the HNSW struct itself
+    std.heap.page_allocator.destroy(self);
 }
-
 fn addHNSW(ptr: *anyopaque, vector: []const f32) Allocator.Error!u64 {
     const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
-    return self.addItem(vector);
+    // Generate a new ID for the vector
+    const new_id: u64 = @intCast(self.nodes.count());
+    return self.addItem(new_id, vector);
 }
 
 fn searchHNSW(allocator: std.mem.Allocator, ptr: *anyopaque, query: []const f32, limit: usize) Allocator.Error![]SearchResult {
