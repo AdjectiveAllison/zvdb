@@ -91,6 +91,21 @@ pub const MemoryStorage = struct {
         return self.vectors.count();
     }
 
+    pub fn clear(self: *Self) void {
+        var vector_it = self.vectors.iterator();
+        while (vector_it.next()) |entry| {
+            self.allocator.free(entry.value_ptr.*);
+        }
+        self.vectors.clearAndFree();
+
+        var metadata_it = self.metadata.iterator();
+        while (metadata_it.next()) |entry| {
+            entry.value_ptr.*.deinit();
+            self.allocator.destroy(entry.value_ptr.*);
+        }
+        self.metadata.clearAndFree();
+    }
+
     pub fn serializeVectors(self: *const Self, allocator: Allocator) ![]u8 {
         var serialized_data = std.ArrayList(u8).init(allocator);
         errdefer serialized_data.deinit();
