@@ -103,7 +103,8 @@ pub const MemoryStorage = struct {
             try serialized_data.writer().writeInt(u64, id, .little);
             try serialized_data.writer().writeInt(u32, @intCast(vector.len), .little);
             for (vector) |value| {
-                try serialized_data.writer().writeInt(f32, value, .little);
+                const bits: u32 = @bitCast(value);
+                try serialized_data.writer().writeInt(u32, bits, .little);
             }
         }
 
