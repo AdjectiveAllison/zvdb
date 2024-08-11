@@ -132,7 +132,10 @@ pub const HNSW = struct {
         // Remove connections to this node from all other nodes
         for (node.connections.items) |neighbor_id| {
             if (self.nodes.getPtr(neighbor_id)) |neighbor| {
-                _ = neighbor.*.connections.swapRemove(id);
+                // Find the index of the id in the neighbor's connections
+                if (std.mem.indexOfScalar(u64, neighbor.*.connections.items, id)) |index| {
+                    _ = neighbor.*.connections.orderedRemove(index);
+                }
             }
         }
 
@@ -142,17 +145,27 @@ pub const HNSW = struct {
             self.allocator.destroy(node);
         }
 
-        // Free the memory associated with the node
-        node.deinit(self.allocator);
-
         // If the deleted node was the entry point, update it
         if (self.entry_point) |entry_point| {
             if (entry_point == id) {
-                self.entry_point = if (self.nodes.count() > 0) blk: {
-                    var it = self.nodes.keyIterator();
-                    break :blk if (it.next()) |key_ptr| key_ptr.* else null;
-                } else null;
+                self.entry_point = if (self.nodes.count() > 0)
+                    blk: {
+                        var it = self.nodes.keyIterator();
+                        break :blk if (it.next()) |key_ptr| key_ptr.* else null;
+                    }
+                else
+                    null;
             }
+        }
+
+        // Update max_level if necessary
+        if (self.max_level > 0) {
+            var new_max_level: usize = 0;
+            var it = self.nodes.valueIterator();
+            while (it.next()) |node_ptr| {
+                new_max_level = @max(new_max_level, node_ptr.*.connections.items.len);
+            }
+            self.max_level = new_max_level;
         }
     }
 
