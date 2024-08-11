@@ -90,8 +90,8 @@ pub const HNSW = struct {
         var curr_dist = distance.getDistanceFunction(self.distance_metric)(vector, self.nodes.get(curr_node_id).?.vector);
 
         // Traverse the layers
-        var lc = self.max_level;
-        while (lc > level) : (lc -= 1) {
+        var lc: i32 = @intCast(self.max_level);
+        while (lc >= 0) : (lc -= 1) {
             var changed = true;
             while (changed) {
                 changed = false;
@@ -104,17 +104,16 @@ pub const HNSW = struct {
                     }
                 }
             }
-        }
 
-        // Connect the new node to its neighbors
-        while (lc >= 0) : (lc -= 1) {
-            const neighbors = try self.searchLayer(vector, curr_node_id, self.config.ef_construction, lc);
-            defer self.allocator.free(neighbors);
+            if (lc <= level) {
+                const neighbors = try self.searchLayer(vector, curr_node_id, self.config.ef_construction, @intCast(lc));
+                defer self.allocator.free(neighbors);
 
-            try self.connectNewElement(new_node, neighbors, lc);
+                try self.connectNewElement(new_node, neighbors, @intCast(lc));
 
-            if (neighbors.len > 0) {
-                curr_node_id = neighbors[0];
+                if (neighbors.len > 0) {
+                    curr_node_id = neighbors[0];
+                }
             }
         }
 
@@ -149,13 +148,10 @@ pub const HNSW = struct {
         // If the deleted node was the entry point, update it
         if (self.entry_point) |entry_point| {
             if (entry_point == id) {
-                self.entry_point = if (self.nodes.count() > 0)
-                    blk: {
-                        var it = self.nodes.keyIterator();
-                        break :blk if (it.next()) |key_ptr| key_ptr.* else null;
-                    }
-                else
-                    null;
+                self.entry_point = if (self.nodes.count() > 0) blk: {
+                    var it = self.nodes.keyIterator();
+                    break :blk if (it.next()) |key_ptr| key_ptr.* else null;
+                } else null;
             }
         }
     }
@@ -268,7 +264,7 @@ pub const HNSW = struct {
         const result = try self.allocator.alloc(u64, results.count());
         var i: usize = 0;
         while (results.removeOrNull()) |id| {
-            result[results.count() - i - 1] = id;
+            result[i] = id;
             i += 1;
         }
 
