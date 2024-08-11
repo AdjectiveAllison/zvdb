@@ -1,39 +1,92 @@
 const std = @import("std");
 
-// Although this function looks imperative, note that its job is to
-// declaratively construct a build graph that will be executed by an external
-// runner.
 pub fn build(b: *std.Build) void {
     const target = b.standardTargetOptions(.{});
     const optimize = b.standardOptimizeOption(.{});
 
+    // Main library
     const lib = b.addStaticLibrary(.{
         .name = "zvdb",
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
-        .root_source_file = b.path("src/root.zig"),
+        .root_source_file = .{ .path = "src/zvdb.zig" },
         .target = target,
         .optimize = optimize,
     });
-
-    // This declares intent for the library to be installed into the standard
-    // location when the user invokes the "install" step (the default step when
-    // running `zig build`).
     b.installArtifact(lib);
 
-    // Creates a step for unit testing. This only builds the test executable
-    // but does not run it.
-    const lib_unit_tests = b.addTest(.{
-        .root_source_file = b.path("src/root.zig"),
+    // Tests
+    const main_tests = b.addTest(.{
+        .root_source_file = .{ .path = "src/zvdb.zig" },
         .target = target,
         .optimize = optimize,
     });
 
-    const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
+    const run_main_tests = b.addRunArtifact(main_tests);
 
-    // Similar to creating the run step earlier, this exposes a `test` step to
-    // the `zig build --help` menu, providing a way for the user to request
-    // running the unit tests.
-    const test_step = b.step("test", "Run unit tests");
-    test_step.dependOn(&run_lib_unit_tests.step);
+    const test_step = b.step("test", "Run library tests");
+    test_step.dependOn(&run_main_tests.step);
+
+    // Add unit tests
+    const unit_tests = b.addTest(.{
+        .root_source_file = .{ .path = "tests/unit/main.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    const run_unit_tests = b.addRunArtifact(unit_tests);
+    const unit_test_step = b.step("unit-test", "Run unit tests");
+    unit_test_step.dependOn(&run_unit_tests.step);
+
+    // Add integration tests
+    const integration_tests = b.addTest(.{
+        .root_source_file = .{ .path = "tests/integration/full_flow_test.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    const run_integration_tests = b.addRunArtifact(integration_tests);
+    const integration_test_step = b.step("integration-test", "Run integration tests");
+    integration_test_step.dependOn(&run_integration_tests.step);
+
+    // Examples
+    const basic_example = b.addExecutable(.{
+        .name = "basic_usage",
+        .root_source_file = .{ .path = "examples/basic_usage.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    basic_example.addModule("zvdb", lib.getModule("zvdb"));
+    b.installArtifact(basic_example);
+
+    const advanced_example = b.addExecutable(.{
+        .name = "advanced_usage",
+        .root_source_file = .{ .path = "examples/advanced_usage.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    advanced_example.addModule("zvdb", lib.getModule("zvdb"));
+    b.installArtifact(advanced_example);
+
+    // Benchmarks
+    const index_benchmark = b.addExecutable(.{
+        .name = "index_performance",
+        .root_source_file = .{ .path = "benchmarks/index_performance.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    index_benchmark.addModule("zvdb", lib.getModule("zvdb"));
+    b.installArtifact(index_benchmark);
+
+    const search_benchmark = b.addExecutable(.{
+        .name = "search_performance",
+        .root_source_file = .{ .path = "benchmarks/search_performance.zig" },
+        .target = target,
+        .optimize = optimize,
+    });
+    search_benchmark.addModule("zvdb", lib.getModule("zvdb"));
+    b.installArtifact(search_benchmark);
+
+    // Run benchmarks step
+    const run_benchmarks = b.step("benchmark", "Run performance benchmarks");
+    const run_index_benchmark = b.addRunArtifact(index_benchmark);
+    const run_search_benchmark = b.addRunArtifact(search_benchmark);
+    run_benchmarks.dependOn(&run_index_benchmark.step);
+    run_benchmarks.dependOn(&run_search_benchmark.step);
 }
