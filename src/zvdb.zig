@@ -17,7 +17,7 @@ pub const ZVDB = struct {
     const Self = @This();
 
     pub fn init(allocator: Allocator, zvdb_config: config.Config) !Self {
-        var zvdb = Self{
+        const zvdb = Self{
             .allocator = allocator,
             .index = try index.createIndex(allocator, zvdb_config.index_config),
             .config = zvdb_config,
@@ -31,13 +31,12 @@ pub const ZVDB = struct {
         self.metadata_schema.deinit();
     }
 
-    // TODO: Same as config from up above, a code smell for shadowing the name.
-    pub fn add(self: *Self, vector: []const f32, metadata: ?json.Value) !u64 {
+    pub fn add(self: *Self, vector: []const f32, new_metadata: ?json.Value) !u64 {
         if (vector.len != self.config.dimension) {
             return error.InvalidVectorDimension;
         }
 
-        if (metadata) |md| {
+        if (new_metadata) |md| {
             try self.metadata_schema.validate(md);
         }
 
