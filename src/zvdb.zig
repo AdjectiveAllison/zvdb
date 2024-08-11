@@ -5,6 +5,7 @@ const Allocator = std.mem.Allocator;
 const config = @import("config.zig");
 const index = @import("index/index.zig");
 const distance = @import("distance/distance.zig");
+const DistanceMetric = distance.DistanceMetric;
 const storage = @import("storage/persistence.zig");
 const metadata = @import("metadata/schema.zig");
 
@@ -50,9 +51,19 @@ pub const ZVDB = struct {
             return error.InvalidVectorDimension;
         }
 
-        const results = try self.index.search(query, limit);
-        // TODO: Fetch and include metadata in results
-        return results;
+        const distance_fn = self.config.distance_function;
+        const results = try self.index.search(query, limit, distance_fn);
+
+        var search_results = try self.allocator.alloc(SearchResult, results.len);
+        for (results, 0..) |result, i| {
+            search_results[i] = .{
+                .id = result.id,
+                .distance = result.distance,
+                .metadata = null, // TODO: Fetch and include metadata in results
+            };
+        }
+
+        return search_results;
     }
 
     pub fn delete(self: *Self, id: u64) !void {
@@ -89,6 +100,6 @@ pub const ZVDB = struct {
 
 pub const SearchResult = struct {
     id: u64,
-    similarity: f32,
+    distance: f32,
     metadata: ?json.Value,
 };
