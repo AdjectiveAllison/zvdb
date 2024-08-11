@@ -1,11 +1,12 @@
 const std = @import("std");
 const distance = @import("distance/distance.zig");
+const DistanceMetric = distance.DistanceMetric;
 const index = @import("index/index.zig");
 
 pub const Config = struct {
     // General configuration
     dimension: usize,
-    distance_function: distance.DistanceFunction,
+    distance_metric: DistanceMetric,
 
     // Index configuration
     index_config: index.IndexConfig,
@@ -18,14 +19,14 @@ pub const Config = struct {
 
     pub fn init(
         dimension: usize,
-        distance_function: distance.DistanceFunction,
+        distance_metric: DistanceMetric,
         index_config: index.IndexConfig,
         metadata_schema: []const u8,
         storage_path: ?[]const u8,
     ) Config {
         return .{
             .dimension = dimension,
-            .distance_function = distance_function,
+            .distance_metric = distance_metric,
             .index_config = index_config,
             .metadata_schema = metadata_schema,
             .storage_path = storage_path,
@@ -42,7 +43,7 @@ pub const Config = struct {
 
 pub const ConfigBuilder = struct {
     dimension: ?usize = null,
-    distance_function: ?distance.DistanceFunction = null,
+    distance_metric: ?DistanceMetric = null,
     index_config: ?index.IndexConfig = null,
     metadata_schema: ?[]const u8 = null,
     storage_path: ?[]const u8 = null,
@@ -56,8 +57,8 @@ pub const ConfigBuilder = struct {
         return self;
     }
 
-    pub fn setDistanceFunction(self: *ConfigBuilder, dist_fn: distance.DistanceFunction) *ConfigBuilder {
-        self.distance_function = dist_fn;
+    pub fn setDistanceMetric(self: *ConfigBuilder, metric: DistanceMetric) *ConfigBuilder {
+        self.distance_metric = metric;
         return self;
     }
 
@@ -77,13 +78,13 @@ pub const ConfigBuilder = struct {
     }
 
     pub fn build(self: *ConfigBuilder, allocator: std.mem.Allocator) !Config {
-        if (self.dimension == null or self.distance_function == null or self.index_config == null or self.metadata_schema == null) {
+        if (self.dimension == null or self.distance_metric == null or self.index_config == null or self.metadata_schema == null) {
             return error.MissingRequiredConfiguration;
         }
 
         return Config.init(
             self.dimension.?,
-            self.distance_function.?,
+            distance.getDistanceFunction(self.distance_metric.?),
             self.index_config.?,
             try allocator.dupe(u8, self.metadata_schema.?),
             if (self.storage_path) |path| try allocator.dupe(u8, path) else null,
