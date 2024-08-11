@@ -1,6 +1,7 @@
 const std = @import("std");
 const json = std.json;
 const Allocator = std.mem.Allocator;
+const Metadata = @import("json.zig").Metadata;
 
 pub const SchemaError = error{
     InvalidSchema,
