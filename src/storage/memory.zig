@@ -121,7 +121,15 @@ pub const MemoryStorage = struct {
             const md = entry.value_ptr.*;
 
             try serialized_data.writer().writeInt(u64, id, .little);
-            const md_json = try std.json.stringifyAlloc(allocator, md.*, .{});
+            
+            // Serialize only the serializable fields of MetadataSchema
+            const serializable_md = .{
+                .name = md.name,
+                .value = md.value,
+                .tags = md.tags.items,
+            };
+            
+            const md_json = try std.json.stringifyAlloc(allocator, serializable_md, .{});
             defer allocator.free(md_json);
             try serialized_data.writer().writeInt(u32, @intCast(md_json.len), .little);
             try serialized_data.writer().writeAll(md_json);

@@ -281,12 +281,29 @@ pub const HNSW = struct {
                 return error.InvalidMetadataLength;
             }
 
-            const node_metadata = try self.allocator.alloc(u8, metadata_len);
-            errdefer self.allocator.free(node_metadata);
-            try reader.readNoEof(node_metadata);
+            const node_metadata_json = try self.allocator.alloc(u8, metadata_len);
+            defer self.allocator.free(node_metadata_json);
+            try reader.readNoEof(node_metadata_json);
             std.debug.print("Node {} metadata: {} bytes\n", .{id, metadata_len});
 
-            var node = try Node.init(self.allocator, id, vector, node_metadata);
+            const parsed_metadata = try std.json.parseFromSlice(
+                struct {
+                    name: ?[]const u8,
+                    value: f32,
+                    tags: []const []const u8,
+                },
+                self.allocator,
+                node_metadata_json,
+                .{},
+            );
+            defer parsed_metadata.deinit();
+
+            var node_metadata = try metadata.MetadataSchema.init(self.allocator);
+            node_metadata.name = if (parsed_metadata.value.name) |name| try self.allocator.dupe(u8, name) else null;
+            node_metadata.value = parsed_metadata.value.value;
+            try node_metadata.tags.appendSlice(parsed_metadata.value.tags);
+
+            var node = try Node.init(self.allocator, id, vector, &node_metadata);
             node.connections = connections;
             try self.nodes.put(id, node);
         }
