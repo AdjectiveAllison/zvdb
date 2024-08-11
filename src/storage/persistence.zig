@@ -103,6 +103,8 @@ pub const Persistence = struct {
             std.debug.print("Error reading file format: {}\n", .{err});
             if (err == error.MetadataTooLarge) {
                 std.debug.print("Metadata size exceeds the limit. Please check the file integrity.\n", .{});
+            } else if (err == error.MetadataAllocationFailed) {
+                std.debug.print("Failed to allocate memory for metadata. This might be due to insufficient memory or an incorrect metadata size in the file.\n", .{});
             }
             return err;
         };
