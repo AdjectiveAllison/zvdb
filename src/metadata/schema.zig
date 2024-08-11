@@ -24,7 +24,7 @@ pub const Schema = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        self.schema.deinit(self.allocator);
+        self.allocator.free(self.schema);
     }
 
     pub fn validate(self: *const Self, metadata: json.Value) SchemaError!void {
