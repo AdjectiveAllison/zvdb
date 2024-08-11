@@ -79,7 +79,7 @@ pub const HNSW = struct {
         self.nodes.deinit();
     }
 
-    pub fn addItem(self: *Self, vector: []const f32, md: *metadata.MetadataSchema) !u64 {
+    pub fn addItem(self: *Self, vector: []const f32, md: *const metadata.MetadataSchema) !u64 {
         const new_id: u64 = @intCast(self.nodes.count());
         const new_node = try Node.init(self.allocator, new_id, vector, md);
         errdefer new_node.deinit(self.allocator);
@@ -207,8 +207,7 @@ pub const HNSW = struct {
             for (node.connections.items) |connection| {
                 try writer.writeInt(u64, connection, .little);
             }
-            try writer.writeInt(u32, @intCast(node.metadata.len), .little);
-            try writer.writeAll(node.metadata);
+            try node.metadata.serialize(writer);
         }
         std.debug.print("HNSW serialization complete\n", .{});
     }
@@ -280,7 +279,10 @@ pub const HNSW = struct {
                 return error.InvalidMetadataLength;
             }
 
-            const node_metadata = try metadata.MetadataSchema.deserialize(self.allocator, reader);
+            var metadata_buffer = std.ArrayList(u8).init(self.allocator);
+            defer metadata_buffer.deinit();
+            try metadata.MetadataSchema.deserialize(self.allocator, reader, &metadata_buffer);
+            const node_metadata = try metadata.MetadataSchema.fromBuffer(self.allocator, metadata_buffer.items);
             var node = try Node.init(self.allocator, id, vector, node_metadata);
             node.connections = connections;
             try self.nodes.put(id, node);
@@ -347,7 +349,7 @@ pub const HNSW = struct {
             result[i] = .{
                 .id = id,
                 .distance = distance.getDistanceFunction(self.distance_metric)(query, node.vector),
-                .metadata = try metadata.MetadataSchema.deserialize(self.allocator, node.metadata),
+                .metadata = try node.metadata.clone(self.allocator),
             };
         }
 

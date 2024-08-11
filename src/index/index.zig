@@ -111,7 +111,7 @@ fn deinitHNSW(ptr: *anyopaque) void {
 
 fn addHNSW(ptr: *anyopaque, vector: []const f32) Allocator.Error!u64 {
     const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
-    return self.addItem(vector);
+    return self.addItem(vector, null); // Passing null for metadata, update this if needed
 }
 
 fn searchHNSW(allocator: std.mem.Allocator, ptr: *anyopaque, query: []const f32, limit: usize) ![]SearchResult {
