@@ -91,17 +91,24 @@ pub const FileFormat = struct {
             return err;
         };
         std.debug.print("Read metadata size: {} bytes\n", .{metadata_size});
+
+        // Check if metadata_size is reasonable
         if (metadata_size > 10_000_000_000) { // 10 GB limit
             std.debug.print("Metadata size exceeds limit of 10 GB. Read size: {} bytes\n", .{metadata_size});
             return error.MetadataTooLarge;
         }
         if (metadata_size == 0) {
             std.debug.print("Warning: Metadata size is 0\n", .{});
-        }
-        if (metadata_size == 0) {
-            std.debug.print("Warning: Metadata size is 0\n", .{});
             self.metadata = &[_]u8{};
         } else {
+            // Check if metadata_size is within the remaining file size
+            const current_position = try reader.context.getPos();
+            const remaining_size = try reader.context.getEndPos() - current_position;
+            if (metadata_size > remaining_size) {
+                std.debug.print("Metadata size ({} bytes) exceeds remaining file size ({} bytes)\n", .{metadata_size, remaining_size});
+                return error.InvalidMetadataSize;
+            }
+
             self.metadata = self.allocator.alloc(u8, metadata_size) catch |err| {
                 std.debug.print("Failed to allocate memory for metadata. Size: {} bytes, Error: {}\n", .{metadata_size, err});
                 return error.MetadataAllocationFailed;
@@ -109,13 +116,13 @@ pub const FileFormat = struct {
         }
         std.debug.print("Allocated memory for metadata: {} bytes\n", .{self.metadata.len});
         errdefer self.allocator.free(self.metadata);
-        const metadata_bytes_read = reader.readAll(self.metadata) catch |err| {
-            std.debug.print("Error reading metadata: {}\n", .{err});
-            return err;
-        };
-        if (metadata_bytes_read != metadata_size) {
-            std.debug.print("Incomplete metadata read. Expected {} bytes, got {} bytes\n", .{metadata_size, metadata_bytes_read});
-            return error.IncompleteRead;
+
+        if (metadata_size > 0) {
+            const metadata_bytes_read = try reader.readAll(self.metadata);
+            if (metadata_bytes_read != metadata_size) {
+                std.debug.print("Incomplete metadata read. Expected {} bytes, got {} bytes\n", .{metadata_size, metadata_bytes_read});
+                return error.IncompleteRead;
+            }
         }
 
         const index_data_size = try reader.readInt(u64, .little);
