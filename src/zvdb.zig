@@ -48,11 +48,11 @@ pub const ZVDB = struct {
         }
 
         if (new_metadata) |md| {
-            try self.metadata_schema.validate(md);
+            try self.metadata_schema.validate(&md);
         }
 
         const id = try self.index.add(vector);
-        const metadata_bytes = if (new_metadata) |md| try std.json.stringifyAlloc(self.allocator, md, .{}) else null;
+        const metadata_bytes = if (new_metadata) |md| try std.json.stringifyAlloc(self.allocator, md.getValue(), .{}) else null;
         defer if (metadata_bytes) |mb| self.allocator.free(mb);
 
         try self.memory_storage.add(vector, metadata_bytes);

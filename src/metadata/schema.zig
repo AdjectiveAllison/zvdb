@@ -27,11 +27,11 @@ pub const Schema = struct {
         self.allocator.free(self.schema);
     }
 
-    pub fn validate(self: *const Self, metadata: json.Value) SchemaError!void {
+    pub fn validate(self: *const Self, metadata: *const Metadata) SchemaError!void {
         // TODO: Implement schema validation
         // This is a placeholder implementation
         _ = self;
-        _ = metadata;
+        _ = metadata.getValue();
     }
 
     pub fn update(self: *Self, new_schema_str: []const u8) !void {

@@ -29,7 +29,7 @@ pub const Metadata = struct {
     }
 
     pub fn validate(self: *const Self, schema: *const Schema) !void {
-        try schema.validate(self.data);
+        try schema.validate(self);
     }
 
     pub fn toJsonString(self: *const Self) ![]u8 {
@@ -47,5 +47,9 @@ pub const Metadata = struct {
             .allocator = allocator,
             .data = parsed.value,
         };
+    }
+
+    pub fn getValue(self: *const Self) json.Value {
+        return self.data;
     }
 };
