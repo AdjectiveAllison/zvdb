@@ -11,15 +11,13 @@ pub const MetadataSchema = struct {
 
     const Self = @This();
 
-    pub fn init(allocator: Allocator) !*Self {
-        const self = try allocator.create(Self);
-        self.* = .{
+    pub fn init(allocator: Allocator) MetadataSchema {
+        return MetadataSchema{
             .allocator = allocator,
             .name = null,
             .value = null,
             .tags = ArrayList([]const u8).init(allocator),
         };
-        return self;
     }
 
     pub fn deinit(self: *Self) void {
@@ -57,8 +55,15 @@ pub const MetadataSchema = struct {
     }
 
     pub fn deserialize(allocator: Allocator, data: []const u8) !*Self {
-        var self = try Self.init(allocator);
-        errdefer self.deinit();
+        var self = try allocator.create(Self);
+        errdefer allocator.destroy(self);
+
+        self.* = .{
+            .allocator = allocator,
+            .name = null,
+            .value = null,
+            .tags = ArrayList([]const u8).init(allocator),
+        };
 
         var lines = std.mem.splitSequence(u8, data, "\n");
         while (lines.next()) |line| {
@@ -89,17 +94,21 @@ pub const MetadataSchema = struct {
         self.name = try self.allocator.dupe(u8, name);
     }
 
-    pub fn clone(self: *const Self, allocator: Allocator) !*MetadataSchema {
+    pub fn clone(self: *const MetadataSchema, allocator: Allocator) !*MetadataSchema {
         var new_metadata = try allocator.create(MetadataSchema);
+        errdefer allocator.destroy(new_metadata);
+
         new_metadata.* = .{
             .allocator = allocator,
             .name = if (self.name) |name| try allocator.dupe(u8, name) else null,
             .value = self.value,
             .tags = try ArrayList([]const u8).initCapacity(allocator, self.tags.items.len),
         };
+
         for (self.tags.items) |tag| {
             try new_metadata.tags.append(try allocator.dupe(u8, tag));
         }
+
         return new_metadata;
     }
 

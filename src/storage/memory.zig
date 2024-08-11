@@ -51,7 +51,7 @@ pub const MemoryStorage = struct {
         };
     }
 
-    pub fn update(self: *Self, id: u64, vector: []const f32, md: ?*const metadata.MetadataSchema) !void {
+    pub fn update(self: *Self, id: u64, vector: []const f32, md: ?metadata.MetadataSchema) !void {
         if (self.vectors.getPtr(id)) |vector_ptr| {
             self.allocator.free(vector_ptr.*);
             vector_ptr.* = try self.allocator.dupe(f32, vector);
@@ -97,7 +97,7 @@ pub const MemoryStorage = struct {
             .allocator = allocator,
             .name = if (self.name) |name| try allocator.dupe(u8, name) else null,
             .value = self.value,
-            .tags = try ArrayList([]u8).initCapacity(allocator, self.tags.items.len),
+            .tags = try ArrayList([]const u8).initCapacity(allocator, self.tags.items.len),
         };
         for (self.tags.items) |tag| {
             try new_metadata.tags.append(try allocator.dupe(u8, tag));

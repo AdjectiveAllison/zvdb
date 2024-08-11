@@ -118,6 +118,7 @@ pub const Persistence = struct {
         var metadata_stream = std.io.fixedBufferStream(self.file_format.metadata);
         var metadata_reader = metadata_stream.reader();
 
+
         var i: u64 = 0;
         while (i < self.file_format.vector_count) : (i += 1) {
             const vector = try self.allocator.alloc(f32, zvdb.config.dimension);
@@ -132,10 +133,15 @@ pub const Persistence = struct {
                 try metadata_reader.readNoEof(metadata_bytes);
 
                 break :blk try metadata.MetadataSchema.deserialize(self.allocator, metadata_bytes);
-            } else null;
+            } else try self.allocator.create(metadata.MetadataSchema);
 
-            try self.memory_storage.add(i, vector, md orelse try metadata.MetadataSchema.init(self.allocator));
+            if (has_metadata == 0) {
+                md.* = metadata.MetadataSchema.init(self.allocator);
+            }
+
+            try self.memory_storage.add(i, vector, md);
         }
+
 
         // Deserialize index data
         var index_stream = std.io.fixedBufferStream(self.file_format.index_data);

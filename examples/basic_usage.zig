@@ -8,7 +8,7 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     // Configure ZVDB
-    const zvdb_config = try zvdb.config.Config.init(
+    var zvdb_config = try zvdb.config.Config.init(
         allocator,
         3,
         .Euclidean,
@@ -19,6 +19,7 @@ pub fn main() !void {
         } },
         "zvdb_data.bin",
     );
+    defer zvdb_config.deinit();
 
     // Initialize ZVDB
     var db = try zvdb.ZVDB.init(allocator, zvdb_config);
@@ -26,8 +27,12 @@ pub fn main() !void {
 
     // Add vectors with metadata
     const vector1 = [_]f32{ 1.0, 2.0, 3.0 };
-    var metadata1 = try zvdb.metadata.MetadataSchema.init(allocator);
-    defer metadata1.deinit();
+    var metadata1 = try allocator.create(zvdb.metadata.MetadataSchema);
+    metadata1.* = zvdb.metadata.MetadataSchema.init(allocator);
+    defer {
+        metadata1.deinit();
+        allocator.destroy(metadata1);
+    }
     try metadata1.setName("Point A");
     metadata1.value = 42.0;
     try metadata1.addTag("tag1");
@@ -39,8 +44,12 @@ pub fn main() !void {
     std.debug.print("Added vector with ID: {}\n", .{id1});
 
     const vector2 = [_]f32{ 4.0, 5.0, 6.0 };
-    var metadata2 = try zvdb.metadata.MetadataSchema.init(allocator);
-    defer metadata2.deinit();
+    var metadata2 = try allocator.create(zvdb.metadata.MetadataSchema);
+    metadata2.* = zvdb.metadata.MetadataSchema.init(allocator);
+    defer {
+        metadata2.deinit();
+        allocator.destroy(metadata2);
+    }
     try metadata2.setName("Point B");
     metadata2.value = 73.0;
     try metadata2.addTag("tag3");
@@ -53,7 +62,7 @@ pub fn main() !void {
     const search_results = try db.search(&query, 2);
     defer {
         for (search_results) |*result| {
-            result.deinit();
+            result.deinit(allocator);
         }
         allocator.free(search_results);
     }
@@ -83,9 +92,9 @@ pub fn main() !void {
 
     // Update a vector and its metadata
     const updated_vector = [_]f32{ 1.5, 2.5, 3.5 };
-    var updated_metadata = try zvdb.metadata.MetadataSchema.init(allocator);
+    var updated_metadata = zvdb.metadata.MetadataSchema.init(allocator);
     defer updated_metadata.deinit();
-    updated_metadata.name = try allocator.dupe(u8, "Updated Point A");
+    try updated_metadata.setName("Updated Point A");
     updated_metadata.value = 50.0;
 
     try db.update(id1, &updated_vector, updated_metadata);
@@ -109,7 +118,7 @@ pub fn main() !void {
     const loaded_search_results = try loaded_db.search(&query, 2);
     defer {
         for (loaded_search_results) |*result| {
-            result.deinit();
+            result.deinit(allocator);
         }
         allocator.free(loaded_search_results);
     }

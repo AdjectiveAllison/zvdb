@@ -27,11 +27,15 @@ pub const ZVDB = struct {
         self.* = .{
             .allocator = allocator,
             .index = undefined,
-            .config = zvdb_config,  // We're now passing in a fully initialized Config
+            .config = zvdb_config,
             .persistence = storage.Persistence.init(allocator),
             .memory_storage = memory.MemoryStorage.init(allocator),
         };
 
+        // If storage_path is provided, make a copy of it
+        if (zvdb_config.storage_path) |path| {
+            self.config.storage_path = try allocator.dupe(u8, path);
+        }
 
         errdefer self.deinit();
 
@@ -56,9 +60,11 @@ pub const ZVDB = struct {
         try new_metadata.validate();
 
         const id = try self.index.add(vector);
+
         try self.memory_storage.add(id, vector, new_metadata);
         return id;
     }
+
 
     pub fn search(self: *Self, query: []const f32, limit: usize) ![]SearchResult {
         if (query.len != self.config.dimension) {
@@ -89,7 +95,7 @@ pub const ZVDB = struct {
         try self.memory_storage.delete(id);
     }
 
-    pub fn update(self: *Self, id: u64, vector: []const f32, new_metadata: ?*const metadata.MetadataSchema) !void {
+    pub fn update(self: *Self, id: u64, vector: []const f32, new_metadata: ?metadata.MetadataSchema) !void {
         if (vector.len != self.config.dimension) {
             return error.InvalidVectorDimension;
         }
@@ -116,9 +122,10 @@ pub const SearchResult = struct {
     distance: f32,
     metadata: ?*metadata.MetadataSchema,
 
-    pub fn deinit(self: *SearchResult) void {
+    pub fn deinit(self: *SearchResult, allocator: Allocator) void {
         if (self.metadata) |md| {
             md.deinit();
+            allocator.destroy(md);
         }
     }
 };
