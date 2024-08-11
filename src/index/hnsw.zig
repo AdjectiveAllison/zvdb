@@ -81,7 +81,10 @@ pub const HNSW = struct {
 
     pub fn addItem(self: *Self, vector: []const f32, md: ?*const metadata.MetadataSchema) !u64 {
         const new_id: u64 = @intCast(self.nodes.count());
-        const new_metadata = if (md) |m| try m.clone(self.allocator) else metadata.MetadataSchema.init(self.allocator);
+        const new_metadata = if (md) |m| 
+            try m.clone(self.allocator) 
+        else 
+            try metadata.MetadataSchema.init(self.allocator);
         const new_node = try Node.init(self.allocator, new_id, vector, new_metadata);
         errdefer new_node.deinit(self.allocator);
 
