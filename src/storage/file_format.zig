@@ -86,7 +86,10 @@ pub const FileFormat = struct {
             return error.IncompleteRead;
         }
 
-        const metadata_size = try reader.readInt(u64, .little);
+        const metadata_size = reader.readInt(u64, .little) catch |err| {
+            std.debug.print("Error reading metadata size: {}\n", .{err});
+            return err;
+        };
         std.debug.print("Read metadata size: {} bytes\n", .{metadata_size});
         if (metadata_size > 10_000_000_000) { // 10 GB limit
             std.debug.print("Metadata size exceeds limit of 10 GB\n", .{});
@@ -101,6 +104,7 @@ pub const FileFormat = struct {
                 return error.MetadataAllocationFailed;
             };
         }
+        std.debug.print("Allocated memory for metadata: {} bytes\n", .{self.metadata.len});
         errdefer self.allocator.free(self.metadata);
         const metadata_bytes_read = try reader.readAll(self.metadata);
         if (metadata_bytes_read != metadata_size) {
