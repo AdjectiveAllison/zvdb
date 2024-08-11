@@ -64,8 +64,9 @@ pub const HNSW = struct {
         self.nodes.deinit();
     }
 
-    pub fn addItem(self: *Self, id: u64, vector: []const f32) !void {
-        const new_node = try Node.init(self.allocator, id, vector);
+    pub fn addItem(self: *Self, vector: []const f32) !u64 {
+        const new_id: u64 = @intCast(self.nodes.count());
+        const new_node = try Node.init(self.allocator, new_id, vector);
         const level = self.randomLevel();
 
         if (level > self.max_level) {
@@ -117,12 +118,55 @@ pub const HNSW = struct {
             self.entry_point = id;
         }
 
-        try self.nodes.put(id, new_node);
+        try self.nodes.put(new_id, new_node);
+        return new_id;
     }
 
-    pub fn searchKnn(self: *Self, query: []const f32, k: usize) ![]u64 {
+    pub fn deleteItem(self: *Self, id: u64) !void {
+        const node = self.nodes.get(id) orelse return error.NodeNotFound;
+
+        // Remove connections to this node from all other nodes
+        for (node.connections.items) |neighbor_id| {
+            if (self.nodes.getPtr(neighbor_id)) |neighbor| {
+                _ = neighbor.connections.swapRemove(id);
+            }
+        }
+
+        // Remove the node from the index
+        _ = self.nodes.remove(id);
+
+        // Free the memory associated with the node
+        node.deinit(self.allocator);
+
+        // If the deleted node was the entry point, update it
+        if (self.entry_point) |entry_point| {
+            if (entry_point == id) {
+                self.entry_point = if (self.nodes.count() > 0) self.nodes.keys()[0] else null;
+            }
+        }
+    }
+
+    pub fn updateItem(self: *Self, id: u64, vector: []const f32) !void {
+        const node = self.nodes.getPtr(id) orelse return error.NodeNotFound;
+
+        // Update the vector
+        self.allocator.free(node.vector);
+        node.vector = try self.allocator.dupe(f32, vector);
+
+        // Reconnect the node in the graph
+        const level = self.randomLevel();
+        var curr_level: usize = 0;
+        while (curr_level <= level and curr_level <= self.max_level) : (curr_level += 1) {
+            const neighbors = try self.searchLayer(vector, self.entry_point.?, self.config.ef_construction, curr_level);
+            defer self.allocator.free(neighbors);
+
+            try self.reconnectNode(node, neighbors, curr_level);
+        }
+    }
+
+    pub fn searchKnn(self: *Self, query: []const f32, k: usize) ![]struct { id: u64, distance: f32 } {
         if (self.entry_point == null) {
-            return &[_]u64{};
+            return &[_]struct { id: u64, distance: f32 }{};
         }
 
         var curr_node_id = self.entry_point.?;
@@ -147,12 +191,16 @@ pub const HNSW = struct {
         const neighbors = try self.searchLayer(query, curr_node_id, self.config.ef_search, 0);
         defer self.allocator.free(neighbors);
 
-        const result = try self.allocator.alloc(u64, @min(k, neighbors.len));
-        @memcpy(result, neighbors[0..@min(k, neighbors.len)]);
+        const result = try self.allocator.alloc(struct { id: u64, distance: f32 }, @min(k, neighbors.len));
+        for (neighbors[0..@min(k, neighbors.len)], 0..) |id, i| {
+            result[i] = .{
+                .id = id,
+                .distance = distance.getDistanceFunction(self.distance_metric)(query, self.nodes.get(id).?.vector),
+            };
+        }
 
         return result;
     }
-
     fn randomLevel(self: *Self) usize {
         // Generate a random float between 0 and 1
         const random_float = std.crypto.random.float(f32);
@@ -230,22 +278,63 @@ pub const HNSW = struct {
         }
     }
 
-    fn shrinkConnections(self: *Self, node: *Node, level: usize) !void {
+    fn pruneConnections(self: *Self, node: *Node, level: usize) !void {
+        const start = level * self.config.max_connections;
+        const end = @min((level + 1) * self.config.max_connections, node.connections.items.len);
+
         var connections = std.PriorityQueue(u64, *const Self, distanceComparator).init(self.allocator, self);
         defer connections.deinit();
 
-        for (node.connections.items) |conn_id| {
+        for (node.connections.items[start..end]) |conn_id| {
             try connections.add(conn_id);
         }
 
-        node.connections.clearRetainingCapacity();
+        node.connections.shrinkRetainingCapacity(start);
 
-        // Adjust max connections based on the level
-        const level_max_connections = @max(self.config.max_connections / (level + 1), 2);
-
-        while (connections.count() > 0 and node.connections.items.len < level_max_connections) {
+        while (connections.count() > 0 and node.connections.items.len < (level + 1) * self.config.max_connections) {
             const conn_id = connections.remove();
             try node.connections.append(conn_id);
+        }
+    }
+
+    fn reconnectNode(self: *Self, node: *Node, neighbors: []const u64, level: usize) !void {
+        // Clear existing connections at this level
+        while (node.connections.items.len > level * self.config.max_connections) {
+            _ = node.connections.pop();
+        }
+
+        // Add new connections
+        for (neighbors) |neighbor_id| {
+            if (node.connections.items.len >= (level + 1) * self.config.max_connections) break;
+            if (neighbor_id != node.id) {
+                try node.connections.append(neighbor_id);
+                if (self.nodes.getPtr(neighbor_id)) |neighbor| {
+                    try neighbor.connections.append(node.id);
+                }
+            }
+        }
+
+        // Ensure reciprocal connections and prune if necessary
+        try self.ensureReciprocalConnections(node, level);
+    }
+
+    fn ensureReciprocalConnections(self: *Self, node: *Node, level: usize) !void {
+        const start = level * self.config.max_connections;
+        const end = @min((level + 1) * self.config.max_connections, node.connections.items.len);
+
+        for (node.connections.items[start..end]) |neighbor_id| {
+            if (self.nodes.getPtr(neighbor_id)) |neighbor| {
+                if (!neighbor.connections.contains(node.id)) {
+                    try neighbor.connections.append(node.id);
+                }
+            }
+        }
+
+        // Prune connections if necessary
+        for (self.nodes.values()) |neighbor| {
+            if (neighbor.connections.items.len > (level + 1) * self.config.max_connections) {
+                try self.pruneConnections(neighbor, level);
+            }
         }
     }
 

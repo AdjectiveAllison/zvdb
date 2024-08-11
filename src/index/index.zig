@@ -74,28 +74,24 @@ pub fn createIndex(allocator: Allocator, index_config: IndexConfig) Allocator.Er
 fn deinitHNSW(ptr: *anyopaque) void {
     const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
     self.deinit();
-    // Note: We need to free the memory allocated for the HNSW struct itself
-    std.heap.page_allocator.destroy(self);
+    self.allocator.destroy(self);
 }
 
 fn addHNSW(ptr: *anyopaque, vector: []const f32) Allocator.Error!u64 {
     const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
-    // Generate a new ID for the vector
-    const new_id: u64 = @intCast(self.nodes.count());
-    try self.addItem(new_id, vector);
-    return new_id;
+    return self.addItem(vector);
 }
 
 fn searchHNSW(allocator: std.mem.Allocator, ptr: *anyopaque, query: []const f32, limit: usize) Allocator.Error![]SearchResult {
     const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
     const results = try self.searchKnn(query, limit);
-    // Convert HNSW results to SearchResult structs
-    // This part might need adjustment based on the actual HNSW search result format
+    defer allocator.free(results);
+
     var search_results = try allocator.alloc(SearchResult, results.len);
     for (results, 0..) |result, i| {
         search_results[i] = SearchResult{
-            .id = result,
-            .similarity = 0, // Calculate similarity if needed
+            .id = result.id,
+            .similarity = 1.0 - result.distance, // Convert distance to similarity
         };
     }
     return search_results;
@@ -103,17 +99,10 @@ fn searchHNSW(allocator: std.mem.Allocator, ptr: *anyopaque, query: []const f32,
 
 fn deleteHNSW(ptr: *anyopaque, id: u64) Allocator.Error!void {
     const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
-    _ = self;
-    _ = id;
-    // Implement delete functionality in HNSW if not already present
-    @compileError("Delete functionality not implemented for HNSW");
+    try self.deleteItem(id);
 }
 
 fn updateHNSW(ptr: *anyopaque, id: u64, vector: []const f32) Allocator.Error!void {
     const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
-    _ = self;
-    _ = id;
-    _ = vector;
-    // Implement update functionality in HNSW if not already present
-    @compileError("Update functionality not implemented for HNSW");
+    try self.updateItem(id, vector);
 }
