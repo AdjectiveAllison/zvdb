@@ -134,7 +134,7 @@ pub const Persistence = struct {
                 break :blk try metadata.MetadataSchema.deserialize(self.allocator, metadata_bytes);
             } else null;
 
-            _ = try self.memory_storage.add(vector, md);
+            try self.memory_storage.add(i, vector, md orelse try metadata.MetadataSchema.init(self.allocator));
         }
 
         // Deserialize index data

@@ -4,9 +4,10 @@ const ArrayList = std.ArrayList;
 
 pub const MetadataSchema = struct {
     allocator: Allocator,
-    name: ?[]const u8,
+    name: ?[]u8,
     value: ?f64,
     tags: ArrayList([]const u8),
+
 
     const Self = @This();
 
@@ -87,4 +88,19 @@ pub const MetadataSchema = struct {
         }
         self.name = try self.allocator.dupe(u8, name);
     }
+
+    pub fn clone(self: *const Self, allocator: Allocator) !*MetadataSchema {
+        var new_metadata = try allocator.create(MetadataSchema);
+        new_metadata.* = .{
+            .allocator = allocator,
+            .name = if (self.name) |name| try allocator.dupe(u8, name) else null,
+            .value = self.value,
+            .tags = try ArrayList([]const u8).initCapacity(allocator, self.tags.items.len),
+        };
+        for (self.tags.items) |tag| {
+            try new_metadata.tags.append(try allocator.dupe(u8, tag));
+        }
+        return new_metadata;
+    }
+
 };

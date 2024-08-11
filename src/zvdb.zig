@@ -56,11 +56,7 @@ pub const ZVDB = struct {
         try new_metadata.validate();
 
         const id = try self.index.add(vector);
-        const metadata_bytes = try new_metadata.serialize();
-        defer self.allocator.free(metadata_bytes);
-
-        const deserialized_metadata = try metadata.MetadataSchema.deserialize(self.allocator, metadata_bytes);
-        _ = try self.memory_storage.add(vector, deserialized_metadata);
+        try self.memory_storage.add(id, vector, new_metadata);
         return id;
     }
 
@@ -81,7 +77,7 @@ pub const ZVDB = struct {
             search_results[i] = .{
                 .id = result.id,
                 .distance = 1.0 - result.similarity,
-                .metadata = stored_item.metadata,
+                .metadata = if (stored_item.metadata) |md| try md.clone(self.allocator) else null,
             };
         }
 
@@ -93,7 +89,7 @@ pub const ZVDB = struct {
         try self.memory_storage.delete(id);
     }
 
-    pub fn update(self: *Self, id: u64, vector: []const f32, new_metadata: ?*metadata.MetadataSchema) !void {
+    pub fn update(self: *Self, id: u64, vector: []const f32, new_metadata: ?*const metadata.MetadataSchema) !void {
         if (vector.len != self.config.dimension) {
             return error.InvalidVectorDimension;
         }
