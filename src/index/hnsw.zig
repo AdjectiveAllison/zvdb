@@ -298,7 +298,7 @@ pub const HNSW = struct {
             );
             defer parsed_metadata.deinit();
 
-            var node_metadata = try metadata.MetadataSchema.init(self.allocator);
+            var node_metadata = metadata.MetadataSchema.init(self.allocator);
             node_metadata.name = if (parsed_metadata.value.name) |name| try self.allocator.dupe(u8, name) else null;
             node_metadata.value = parsed_metadata.value.value;
             try node_metadata.tags.appendSlice(parsed_metadata.value.tags);
