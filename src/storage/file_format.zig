@@ -16,6 +16,7 @@ pub const FileFormat = struct {
     vector_data: []u8,
     metadata: []u8,
     index_data: []u8,
+    has_allocated: bool,
 
     const Self = @This();
 
@@ -27,13 +28,17 @@ pub const FileFormat = struct {
             .vector_data = &[_]u8{},
             .metadata = &[_]u8{},
             .index_data = &[_]u8{},
+            .has_allocated = false,
         };
     }
 
     pub fn deinit(self: *Self) void {
-        self.allocator.free(self.vector_data);
-        self.allocator.free(self.metadata);
-        self.allocator.free(self.index_data);
+        if (self.has_allocated) {
+            self.allocator.free(self.vector_data);
+            self.allocator.free(self.metadata);
+            self.allocator.free(self.index_data);
+            self.has_allocated = false;
+        }
     }
 
     pub fn write(self: *const Self, writer: anytype) !void {
@@ -56,6 +61,9 @@ pub const FileFormat = struct {
     }
 
     pub fn read(self: *Self, reader: anytype) !void {
+        // Free previously allocated memory if any
+        self.deinit();
+
         self.header.magic_number = try reader.readBytesNoEof(4);
         self.header.version = try reader.readInt(u32, .little);
         self.header.dimension = try reader.readInt(u32, .little);
@@ -86,6 +94,8 @@ pub const FileFormat = struct {
         if (index_bytes_read != index_data_size) {
             return error.IncompleteRead;
         }
+
+        self.has_allocated = true;
 
         std.debug.print("Read file format: vector_count={}, vector_data={} bytes, metadata={} bytes, index_data={} bytes\n", .{
             self.vector_count,
