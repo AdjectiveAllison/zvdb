@@ -125,16 +125,10 @@ fn updateHNSW(ptr: *anyopaque, id: u64, vector: []const f32) (Allocator.Error ||
 
 fn serializeHNSW(ptr: *anyopaque, writer: *std.io.AnyWriter) !void {
     const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
-    // Implement HNSW serialization here
-    _ = self;
-    _ = writer;
-    @panic("HNSW serialization not implemented");
+    try self.serialize(writer);
 }
 
 fn deserializeHNSW(ptr: *anyopaque, reader: *std.io.AnyReader) !void {
     const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
-    // Implement HNSW deserialization here
-    _ = self;
-    _ = reader;
-    @panic("HNSW deserialization not implemented");
+    try self.deserialize(reader);
 }

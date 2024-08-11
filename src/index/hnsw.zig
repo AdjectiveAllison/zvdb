@@ -169,6 +169,81 @@ pub const HNSW = struct {
         }
     }
 
+    pub fn serialize(self: *HNSW, writer: anytype) !void {
+        // Write basic information
+        try writer.writeInt(usize, self.nodes.count(), .little);
+        try writer.writeInt(usize, self.max_level, .little);
+        if (self.entry_point) |entry_point| {
+            try writer.writeByte(1);
+            try writer.writeInt(u64, entry_point, .little);
+        } else {
+            try writer.writeByte(0);
+        }
+
+        // Write nodes
+        var it = self.nodes.iterator();
+        while (it.next()) |entry| {
+            const id = entry.key_ptr.*;
+            const node = entry.value_ptr.*;
+
+            try writer.writeInt(u64, id, .little);
+            try writer.writeInt(usize, node.vector.len, .little);
+            for (node.vector) |value| {
+                try writer.writeInt(u32, @bitCast(value), .little);
+            }
+
+            try writer.writeInt(usize, node.connections.items.len, .little);
+            for (node.connections.items) |connection| {
+                try writer.writeInt(u64, connection, .little);
+            }
+        }
+    }
+
+    pub fn deserialize(self: *HNSW, reader: anytype) !void {
+        // Clear existing data
+        self.deinit();
+        self.nodes = AutoHashMap(u64, *Node).init(self.allocator);
+
+        // Read basic information
+        const node_count = try reader.readInt(usize, .little);
+        self.max_level = try reader.readInt(usize, .little);
+        const has_entry_point = try reader.readByte();
+        if (has_entry_point == 1) {
+            self.entry_point = try reader.readInt(u64, .little);
+        } else {
+            self.entry_point = null;
+        }
+
+        // Read nodes
+        var i: usize = 0;
+        while (i < node_count) : (i += 1) {
+            const id = try reader.readInt(u64, .little);
+            const vector_len = try reader.readInt(usize, .little);
+            const vector = try self.allocator.alloc(f32, vector_len);
+            for (vector) |*value| {
+                const bits = try reader.readInt(u32, .little);
+                value.* = @bitCast(bits);
+            }
+
+            var node = try self.allocator.create(Node);
+            node.* = Node{
+                .id = id,
+                .vector = vector,
+                .connections = ArrayList(u64).init(self.allocator),
+            };
+
+            const connection_count = try reader.readInt(usize, .little);
+            try node.connections.ensureTotalCapacity(connection_count);
+            var j: usize = 0;
+            while (j < connection_count) : (j += 1) {
+                const connection = try reader.readInt(u64, .little);
+                try node.connections.append(connection);
+            }
+
+            try self.nodes.put(id, node);
+        }
+    }
+
     pub fn updateItem(self: *Self, id: u64, vector: []const f32) !void {
         const node = self.nodes.getPtr(id) orelse return error.NodeNotFound;
 
