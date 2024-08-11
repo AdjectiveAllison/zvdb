@@ -51,8 +51,7 @@ pub const ZVDB = struct {
             return error.InvalidVectorDimension;
         }
 
-        // TODO: Does results need to be a var here? Or should it be `const results`?
-        var results = try self.index.search(query, limit);
+        const results = try self.index.search(query, limit);
         // TODO: Fetch and include metadata in results
         return results;
     }
@@ -62,13 +61,12 @@ pub const ZVDB = struct {
         // TODO: Delete associated metadata
     }
 
-    // TODO: once again a code smelling shadow decleration.
-    pub fn update(self: *Self, id: u64, vector: []const f32, metadata: ?json.Value) !void {
+    pub fn update(self: *Self, id: u64, vector: []const f32, new_metadata: ?json.Value) !void {
         if (vector.len != self.config.dimension) {
             return error.InvalidVectorDimension;
         }
 
-        if (metadata) |md| {
+        if (new_metadata) |md| {
             try self.metadata_schema.validate(md);
         }
 
