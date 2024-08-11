@@ -39,9 +39,13 @@ pub const Persistence = struct {
             .index_type = @intFromEnum(zvdb.config.index_config),
         };
 
+        const vector_count = zvdb.memory_storage.count();
+        self.file_format.vector_count = vector_count;
+        self.file_format.vector_data = try zvdb.memory_storage.serializeVectors(self.allocator);
+        self.file_format.metadata = try zvdb.memory_storage.serializeMetadata(self.allocator);
 
         std.debug.print("Preparing file format data:\n", .{});
-        std.debug.print("  Vector count: {}\n", .{zvdb.memory_storage.count()});
+        std.debug.print("  Vector count: {}\n", .{vector_count});
         std.debug.print("  Vector data size: {} bytes\n", .{self.file_format.vector_data.len});
         std.debug.print("  Metadata size: {} bytes\n", .{self.file_format.metadata.len});
         std.debug.print("  Index data size: {} bytes\n", .{self.file_format.index_data.len});
