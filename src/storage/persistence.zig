@@ -89,30 +89,38 @@ pub const Persistence = struct {
 
         const reader = file.reader();
 
-        // Read and print the entire file content for debugging
-        const file_content = try self.allocator.alloc(u8, file_size);
-        defer self.allocator.free(file_content);
-        _ = try reader.readAll(file_content);
+        self.file_format.deinit(); // Clear any existing data
+        self.file_format = FileFormat.init(self.allocator);
 
-        std.debug.print("File content (hex dump):\n", .{});
-        for (file_content, 0..) |byte, i| {
-            if (i % 16 == 0) {
-                std.debug.print("\n{x:0>4}: ", .{i});
-            }
-            std.debug.print("{x:0>2} ", .{byte});
-        }
-        std.debug.print("\n\n", .{});
-
-        // Reset the file cursor to the beginning
-        try file.seekTo(0);
-
+        // Read and validate file header
         try self.file_format.read(reader);
+        try self.validateFileHeader();
 
         std.debug.print("File header read: magic={s}, version={}, dimension={}, distance_function={}, index_type={}\n",
             .{self.file_format.header.magic_number, self.file_format.header.version, self.file_format.header.dimension,
              self.file_format.header.distance_function, self.file_format.header.index_type});
 
-        // Validate file format
+        // Update ZVDB configuration
+        zvdb.config.dimension = self.file_format.header.dimension;
+        zvdb.config.distance_metric = @enumFromInt(self.file_format.header.distance_function);
+
+        std.debug.print("ZVDB configuration updated\n", .{});
+
+        // Deserialize index data
+        var index_stream = std.io.fixedBufferStream(self.file_format.index_data);
+        const index_reader = index_stream.reader();
+        var any_reader = index_reader.any();
+
+        zvdb.index.deinit(); // Clear existing index
+        zvdb.index = try index.createIndex(self.allocator, zvdb.config.index_config);
+
+        std.debug.print("Deserializing index data ({} bytes)\n", .{self.file_format.index_data.len});
+        try zvdb.index.deserialize(&any_reader);
+
+        std.debug.print("Index data deserialized successfully\n", .{});
+        std.debug.print("Loaded {} vectors\n", .{zvdb.index.getNodeCount()});
+    }
+    fn validateFileHeader(self: *Self) !void {
         if (!std.mem.eql(u8, &self.file_format.header.magic_number, "ZVDB")) {
             return error.InvalidFileFormat;
         }
@@ -121,41 +129,6 @@ pub const Persistence = struct {
             return error.UnsupportedVersion;
         }
 
-        // Update ZVDB configuration
-        zvdb.config.dimension = self.file_format.header.dimension;
-        zvdb.config.distance_metric = @enumFromInt(self.file_format.header.distance_function);
-
-        std.debug.print("ZVDB configuration updated\n", .{});
-
-        // Print index data for debugging
-        std.debug.print("Index data (hex dump):\n", .{});
-        for (self.file_format.index_data, 0..) |byte, i| {
-            if (i % 16 == 0) {
-                std.debug.print("\n{x:0>4}: ", .{i});
-            }
-            std.debug.print("{x:0>2} ", .{byte});
-        }
-        std.debug.print("\n\n", .{});
-
-        // Deserialize index data
-        std.debug.print("Index data size before deserialization: {} bytes\n", .{self.file_format.index_data.len});
-
-        var index_stream = std.io.fixedBufferStream(self.file_format.index_data);
-        const index_reader = index_stream.reader();
-        var any_reader = index_reader.any();
-        std.debug.print("First 16 bytes of index data: ", .{});
-        for (self.file_format.index_data[0..@min(16, self.file_format.index_data.len)]) |byte| {
-            std.debug.print("{x:0>2} ", .{byte});
-        }
-        std.debug.print("\n", .{});
-        try zvdb.index.deserialize(&any_reader);
-
-        std.debug.print("Index data deserialized successfully\n", .{});
-
-        std.debug.print("Loaded file format data:\n", .{});
-        std.debug.print("  Vector count: {}\n", .{self.file_format.vector_count});
-        std.debug.print("  Vector data size: {} bytes\n", .{self.file_format.vector_data.len});
-        std.debug.print("  Metadata size: {} bytes\n", .{self.file_format.metadata.len});
-        std.debug.print("  Index data size: {} bytes\n", .{self.file_format.index_data.len});
+        // Add more validations as needed
     }
 };

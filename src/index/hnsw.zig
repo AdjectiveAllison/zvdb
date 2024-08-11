@@ -218,9 +218,10 @@ pub const HNSW = struct {
         const node_count = try reader.readInt(u32, .little);
         self.max_level = try reader.readInt(u32, .little);
 
-        std.debug.print("Deserializing HNSW: node count={}, max_level={}\n", .{node_count, self.max_level});
+        std.debug.print("HNSW Deserialization: node_count={}, max_level={}\n", .{node_count, self.max_level});
 
         if (node_count > 1_000_000 or self.max_level > 100) {
+            std.debug.print("Invalid data: node_count={}, max_level={}\n", .{node_count, self.max_level});
             return error.InvalidData;
         }
 
