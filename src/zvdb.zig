@@ -7,13 +7,16 @@ const index = @import("index/index.zig");
 const distance = @import("distance/distance.zig");
 const DistanceMetric = distance.DistanceMetric;
 const storage = @import("storage/persistence.zig");
-const metadata = @import("metadata/schema.zig");
+const metadata = struct {
+    const schema = @import("metadata/schema.zig");
+    const json = @import("metadata/json.zig");
+};
 
 pub const ZVDB = struct {
     allocator: Allocator,
     index: index.Index,
     config: config.Config,
-    metadata_schema: metadata.Schema,
+    metadata_schema: metadata.schema.Schema,
 
     const Self = @This();
 
@@ -22,7 +25,7 @@ pub const ZVDB = struct {
             .allocator = allocator,
             .index = try index.createIndex(allocator, zvdb_config.index_config),
             .config = zvdb_config,
-            .metadata_schema = try metadata.Schema.init(allocator, zvdb_config.metadata_schema),
+            .metadata_schema = try metadata.schema.Schema.init(allocator, zvdb_config.metadata_schema),
         };
         return zvdb;
     }
@@ -32,7 +35,7 @@ pub const ZVDB = struct {
         self.metadata_schema.deinit();
     }
 
-    pub fn add(self: *Self, vector: []const f32, new_metadata: ?json.Value) !u64 {
+    pub fn add(self: *Self, vector: []const f32, new_metadata: ?metadata.json.Metadata) !u64 {
         if (vector.len != self.config.dimension) {
             return error.InvalidVectorDimension;
         }
@@ -71,7 +74,7 @@ pub const ZVDB = struct {
         // TODO: Delete associated metadata
     }
 
-    pub fn update(self: *Self, id: u64, vector: []const f32, new_metadata: ?json.Value) !void {
+    pub fn update(self: *Self, id: u64, vector: []const f32, new_metadata: ?metadata.json.Metadata) !void {
         if (vector.len != self.config.dimension) {
             return error.InvalidVectorDimension;
         }
@@ -101,5 +104,5 @@ pub const ZVDB = struct {
 pub const SearchResult = struct {
     id: u64,
     distance: f32,
-    metadata: ?json.Value,
+    metadata: ?metadata.json.Metadata,
 };
