@@ -84,7 +84,7 @@ pub const HNSW = struct {
         const new_metadata = if (md) |m|
             try m.clone(self.allocator)
         else
-            try metadata.MetadataSchema.init(self.allocator);
+            metadata.MetadataSchema.init(self.allocator);
         const new_node = try Node.init(self.allocator, new_id, vector, new_metadata);
         errdefer new_node.deinit(self.allocator);
 
