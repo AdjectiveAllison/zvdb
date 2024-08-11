@@ -225,6 +225,9 @@ pub const HNSW = struct {
             return error.InvalidData;
         }
 
+        // Clear existing nodes
+        self.nodes.clearAndFree();
+
         const has_entry_point = try reader.readByte();
         if (has_entry_point == 1) {
             self.entry_point = try reader.readInt(u64, .little);
