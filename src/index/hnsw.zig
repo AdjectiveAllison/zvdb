@@ -18,8 +18,7 @@ const Node = struct {
     connections: ArrayList(u64),
 
     fn init(allocator: Allocator, id: u64, vector: []const f32) !*Node {
-        // local variable is never mutated. TODO: Change to `const node` or do we need to mutate?
-        var node = try allocator.create(Node);
+        const node = try allocator.create(Node);
         node.* = .{
             .id = id,
             .vector = try allocator.dupe(f32, vector),
@@ -159,7 +158,6 @@ pub const HNSW = struct {
         return @intCast(random.float(f32) * @as(f32, @floatFromInt(self.max_level + 1)));
     }
 
-    // layer function variable is never used. TODO: use it or lose it!
     fn searchLayer(self: *Self, query: []const f32, entry_point: u64, ef: usize, layer: usize) ![]u64 {
         var candidates = std.PriorityQueue(u64, *const Self, distanceComparator).init(self.allocator, self);
         var visited = AutoHashMap(u64, void).init(self.allocator);
@@ -177,7 +175,11 @@ pub const HNSW = struct {
                 break;
             }
 
-            for (self.nodes.get(curr_id).?.connections.items) |neighbor_id| {
+            // Filter connections based on the current layer
+            const connections = self.nodes.get(curr_id).?.connections.items;
+            const layer_connections = connections[0..@min(connections.len, self.config.max_connections * (layer + 1))];
+
+            for (layer_connections) |neighbor_id| {
                 if (!visited.contains(neighbor_id)) {
                     try visited.put(neighbor_id, {});
                     const neighbor_dist = self.distance_fn(query, self.nodes.get(neighbor_id).?.vector);
@@ -223,7 +225,6 @@ pub const HNSW = struct {
         }
     }
 
-    // unused function variable level. TODO: Should we use it somehow or leave a todo for later?
     fn shrinkConnections(self: *Self, node: *Node, level: usize) !void {
         var connections = try std.PriorityQueue(u64, *const Self, distanceComparator).init(self.allocator, self);
         defer connections.deinit();
@@ -234,7 +235,10 @@ pub const HNSW = struct {
 
         node.connections.clearRetainingCapacity();
 
-        while (connections.count() > 0 and node.connections.items.len < self.config.max_connections) {
+        // Adjust max connections based on the level
+        const level_max_connections = @max(self.config.max_connections / (level + 1), 2);
+
+        while (connections.count() > 0 and node.connections.items.len < level_max_connections) {
             const conn_id = connections.remove();
             try node.connections.append(conn_id);
         }
