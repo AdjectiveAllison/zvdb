@@ -154,9 +154,14 @@ pub const HNSW = struct {
     }
 
     fn randomLevel(self: *Self) usize {
-        var rng = std.rand.DefaultPrng.init(@intCast(std.time.milliTimestamp()));
-        const random = rng.random();
-        return @intCast(random.float(f32) * @as(f32, @floatFromInt(self.max_level + 1)));
+        // Generate a random float between 0 and 1
+        const random_float = std.crypto.random.float(f32);
+
+        // Multiply by (max_level + 1) and truncate to get an integer
+        const level = @as(usize, @intFromFloat(random_float * @as(f32, @floatFromInt(self.max_level + 1))));
+
+        // Ensure the level is within bounds
+        return @min(level, self.max_level);
     }
 
     fn searchLayer(self: *Self, query: []const f32, entry_point: u64, ef: usize, layer: usize) ![]u64 {
