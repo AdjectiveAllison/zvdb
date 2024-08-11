@@ -7,6 +7,7 @@ const index = @import("index/index.zig");
 const distance = @import("distance/distance.zig");
 const DistanceMetric = distance.DistanceMetric;
 const storage = @import("storage/persistence.zig");
+const memory = @import("storage/memory.zig");
 const metadata = struct {
     const schema = @import("metadata/schema.zig");
     const json = @import("metadata/json.zig");
@@ -17,6 +18,8 @@ pub const ZVDB = struct {
     index: index.Index,
     config: config.Config,
     metadata_schema: metadata.schema.Schema,
+    persistence: storage.Persistence,
+    memory_storage: memory.MemoryStorage,
 
     const Self = @This();
 
@@ -26,6 +29,8 @@ pub const ZVDB = struct {
             .index = try index.createIndex(allocator, zvdb_config.index_config),
             .config = zvdb_config,
             .metadata_schema = try metadata.schema.Schema.init(allocator, zvdb_config.metadata_schema),
+            .persistence = storage.Persistence.init(allocator),
+            .memory_storage = memory.MemoryStorage.init(allocator),
         };
         return zvdb;
     }
@@ -33,6 +38,8 @@ pub const ZVDB = struct {
     pub fn deinit(self: *Self) void {
         self.index.deinit();
         self.metadata_schema.deinit();
+        self.persistence.deinit();
+        self.memory_storage.deinit();
     }
 
     pub fn add(self: *Self, vector: []const f32, new_metadata: ?metadata.json.Metadata) !u64 {
@@ -45,7 +52,10 @@ pub const ZVDB = struct {
         }
 
         const id = try self.index.add(vector);
-        // TODO: Store metadata separately
+        const metadata_bytes = if (new_metadata) |md| try std.json.stringifyAlloc(self.allocator, md, .{}) else null;
+        defer if (metadata_bytes) |mb| self.allocator.free(mb);
+
+        try self.memory_storage.add(vector, metadata_bytes);
         return id;
     }
 
@@ -59,10 +69,16 @@ pub const ZVDB = struct {
 
         var search_results = try self.allocator.alloc(SearchResult, results.len);
         for (results, 0..) |result, i| {
+            const stored_item = try self.memory_storage.get(result.id);
+            const parsed_metadata = if (stored_item.metadata.len > 0)
+                try std.json.parseFromSlice(metadata.json.Metadata, self.allocator, stored_item.metadata, .{})
+            else
+                null;
+
             search_results[i] = .{
                 .id = result.id,
                 .distance = result.distance,
-                .metadata = null, // TODO: Fetch and include metadata in results
+                .metadata = parsed_metadata,
             };
         }
 
@@ -71,7 +87,7 @@ pub const ZVDB = struct {
 
     pub fn delete(self: *Self, id: u64) !void {
         try self.index.delete(id);
-        // TODO: Delete associated metadata
+        try self.memory_storage.delete(id);
     }
 
     pub fn update(self: *Self, id: u64, vector: []const f32, new_metadata: ?metadata.json.Metadata) !void {
@@ -84,15 +100,18 @@ pub const ZVDB = struct {
         }
 
         try self.index.update(id, vector);
-        // TODO: Update associated metadata
+        const metadata_bytes = if (new_metadata) |md| try std.json.stringifyAlloc(self.allocator, md, .{}) else null;
+        defer if (metadata_bytes) |mb| self.allocator.free(mb);
+
+        try self.memory_storage.update(id, vector, metadata_bytes);
     }
 
     pub fn save(self: *Self, file_path: []const u8) !void {
-        try storage.save(self, file_path);
+        try self.persistence.save(self, file_path);
     }
 
     pub fn load(self: *Self, file_path: []const u8) !void {
-        try storage.load(self, file_path);
+        try self.persistence.load(self, file_path);
     }
 
     pub fn updateMetadataSchema(self: *Self, new_schema: []const u8) !void {
