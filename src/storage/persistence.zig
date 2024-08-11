@@ -99,8 +99,14 @@ pub const Persistence = struct {
         self.file_format = FileFormat.init(self.allocator);
 
         // Read and validate file header
-        try self.file_format.read(reader);
-        try self.validateFileHeader();
+        self.file_format.read(reader) catch |err| {
+            std.debug.print("Error reading file format: {}\n", .{err});
+            return err;
+        };
+        self.validateFileHeader() catch |err| {
+            std.debug.print("Error validating file header: {}\n", .{err});
+            return err;
+        };
 
         std.debug.print("File header read: magic={s}, version={}, dimension={}, distance_function={}, index_type={}\n",
             .{self.file_format.header.magic_number, self.file_format.header.version, self.file_format.header.dimension,
