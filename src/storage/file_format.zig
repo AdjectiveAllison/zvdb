@@ -65,16 +65,28 @@ pub const FileFormat = struct {
         self.vector_count = try reader.readInt(u64, .little);
         const vector_data_size = self.vector_count * self.header.dimension * @sizeOf(f32);
         self.vector_data = try self.allocator.alloc(u8, vector_data_size);
-        try reader.readNoEof(self.vector_data);
+        errdefer self.allocator.free(self.vector_data);
+        const bytes_read = try reader.readAll(self.vector_data);
+        if (bytes_read != vector_data_size) {
+            return error.IncompleteRead;
+        }
 
-        // Read metadata and index data
-        var remaining_data = std.ArrayList(u8).init(self.allocator);
-        defer remaining_data.deinit();
-        try reader.readAllArrayList(&remaining_data, std.math.maxInt(usize));
+        const metadata_size = try reader.readInt(u64, .little);
+        self.metadata = try self.allocator.alloc(u8, metadata_size);
+        errdefer self.allocator.free(self.metadata);
+        const metadata_bytes_read = try reader.readAll(self.metadata);
+        if (metadata_bytes_read != metadata_size) {
+            return error.IncompleteRead;
+        }
 
-        const metadata_size = remaining_data.items.len / 2;
-        self.metadata = try self.allocator.dupe(u8, remaining_data.items[0..metadata_size]);
-        self.index_data = try self.allocator.dupe(u8, remaining_data.items[metadata_size..]);
+        const index_data_size = try reader.readInt(u64, .little);
+        self.index_data = try self.allocator.alloc(u8, index_data_size);
+        errdefer self.allocator.free(self.index_data);
+        const index_bytes_read = try reader.readAll(self.index_data);
+        if (index_bytes_read != index_data_size) {
+            return error.IncompleteRead;
+        }
+
         std.debug.print("Read file format: vector_count={}, vector_data={} bytes, metadata={} bytes, index_data={} bytes\n", .{
             self.vector_count,
             self.vector_data.len,
