@@ -1,6 +1,7 @@
 const std = @import("std");
 const Allocator = std.mem.Allocator;
 const FileFormat = @import("file_format.zig").FileFormat;
+const FileHeader = @import("file_format.zig").FileHeader;
 const MemoryStorage = @import("memory.zig").MemoryStorage;
 const ZVDB = @import("../zvdb.zig").ZVDB;
 const index = @import("../index/index.zig");
@@ -93,7 +94,7 @@ pub const Persistence = struct {
             return error.EmptyFile;
         }
 
-        if (file_size < @sizeOf(FileFormat.FileHeader)) {
+        if (file_size < @sizeOf(FileHeader)) {
             std.debug.print("File size is too small to contain a valid header\n", .{});
             return error.InvalidFileSize;
         }
