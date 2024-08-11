@@ -80,7 +80,32 @@ pub const Persistence = struct {
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
 
+        const file_size = try file.getEndPos();
+        std.debug.print("File size: {} bytes\n", .{file_size});
+
+        if (file_size == 0) {
+            return error.EmptyFile;
+        }
+
         const reader = file.reader();
+
+        // Read and print the entire file content for debugging
+        const file_content = try self.allocator.alloc(u8, file_size);
+        defer self.allocator.free(file_content);
+        _ = try reader.readAll(file_content);
+
+        std.debug.print("File content (hex dump):\n", .{});
+        for (file_content, 0..) |byte, i| {
+            if (i % 16 == 0) {
+                std.debug.print("\n{x:0>4}: ", .{i});
+            }
+            std.debug.print("{x:0>2} ", .{byte});
+        }
+        std.debug.print("\n\n", .{});
+
+        // Reset the file cursor to the beginning
+        try file.seekTo(0);
+
         try self.file_format.read(reader);
 
         std.debug.print("File header read: magic={s}, version={}, dimension={}, distance_function={}, index_type={}\n",
@@ -102,12 +127,27 @@ pub const Persistence = struct {
 
         std.debug.print("ZVDB configuration updated\n", .{});
 
+        // Print index data for debugging
+        std.debug.print("Index data (hex dump):\n", .{});
+        for (self.file_format.index_data, 0..) |byte, i| {
+            if (i % 16 == 0) {
+                std.debug.print("\n{x:0>4}: ", .{i});
+            }
+            std.debug.print("{x:0>2} ", .{byte});
+        }
+        std.debug.print("\n\n", .{});
+
         // Deserialize index data
         std.debug.print("Index data size before deserialization: {} bytes\n", .{self.file_format.index_data.len});
 
         var index_stream = std.io.fixedBufferStream(self.file_format.index_data);
         const index_reader = index_stream.reader();
         var any_reader = index_reader.any();
+        std.debug.print("First 16 bytes of index data: ", .{});
+        for (self.file_format.index_data[0..@min(16, self.file_format.index_data.len)]) |byte| {
+            std.debug.print("{x:0>2} ", .{byte});
+        }
+        std.debug.print("\n", .{});
         try zvdb.index.deserialize(&any_reader);
 
         std.debug.print("Index data deserialized successfully\n", .{});

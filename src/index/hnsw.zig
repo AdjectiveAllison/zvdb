@@ -180,8 +180,10 @@ pub const HNSW = struct {
 
     pub fn serialize(self: *HNSW, writer: anytype) !void {
         std.debug.print("Serializing HNSW: node count={}, max_level={}\n", .{self.nodes.count(), self.max_level});
-        try writer.writeInt(u64, self.nodes.count(), .little);
-        try writer.writeInt(u64, self.max_level, .little);
+
+        try writer.writeInt(u32, @intCast(self.nodes.count()), .little);
+        try writer.writeInt(u32, @intCast(self.max_level), .little);
+
         if (self.entry_point) |entry_point| {
             try writer.writeByte(1);
             try writer.writeInt(u64, entry_point, .little);
@@ -206,23 +208,21 @@ pub const HNSW = struct {
             for (node.connections.items) |connection| {
                 try writer.writeInt(u64, connection, .little);
             }
-            if (node.metadata.len > 0) {
-                try writer.writeByte(1);
-                try writer.writeInt(u32, @intCast(node.metadata.len), .little);
-                try writer.writeAll(node.metadata);
-                std.debug.print("Node {} metadata: {} bytes\n", .{id, node.metadata.len});
-            } else {
-                try writer.writeByte(0);
-                std.debug.print("Node {} has no metadata\n", .{id});
-            }
+            try writer.writeInt(u32, @intCast(node.metadata.len), .little);
+            try writer.writeAll(node.metadata);
         }
         std.debug.print("HNSW serialization complete\n", .{});
     }
 
     pub fn deserialize(self: *HNSW, reader: anytype) !void {
-        const node_count = try reader.readInt(u64, .little);
-        self.max_level = try reader.readInt(u64, .little);
+        const node_count = try reader.readInt(u32, .little);
+        self.max_level = try reader.readInt(u32, .little);
+
         std.debug.print("Deserializing HNSW: node count={}, max_level={}\n", .{node_count, self.max_level});
+
+        if (node_count > 1_000_000 or self.max_level > 100) {
+            return error.InvalidData;
+        }
 
         const has_entry_point = try reader.readByte();
         if (has_entry_point == 1) {
@@ -233,43 +233,56 @@ pub const HNSW = struct {
             std.debug.print("No entry point\n", .{});
         }
 
-        var i: u64 = 0;
+        var i: u32 = 0;
         while (i < node_count) : (i += 1) {
             const id = try reader.readInt(u64, .little);
             const vector_len = try reader.readInt(u32, .little);
             std.debug.print("Deserializing node {}: vector len={}\n", .{id, vector_len});
 
-            const vector = try self.allocator.alloc(f32, vector_len);
+            if (vector_len > 1_000_000) {
+                return error.InvalidVectorLength;
+            }
+
+            var vector = try self.allocator.alloc(f32, vector_len);
             errdefer self.allocator.free(vector);
 
-            for (vector) |*value| {
-                const bits = try reader.readInt(u32, .little);
-                value.* = @bitCast(bits);
+            {
+                var j: u32 = 0;
+                while (j < vector_len) : (j += 1) {
+                    const bits = try reader.readInt(u32, .little);
+                    vector[j] = @bitCast(bits);
+                }
             }
 
             const connections_len = try reader.readInt(u32, .little);
             std.debug.print("Node {} connections: {}\n", .{id, connections_len});
+
+            if (connections_len > 1_000_000) {
+                return error.InvalidConnectionsLength;
+            }
+
             var connections = try std.ArrayList(u64).initCapacity(self.allocator, connections_len);
             errdefer connections.deinit();
 
-            var j: u32 = 0;
-            while (j < connections_len) : (j += 1) {
-                const connection = try reader.readInt(u64, .little);
-                try connections.append(connection);
+            {
+                var j: u32 = 0;
+                while (j < connections_len) : (j += 1) {
+                    const connection = try reader.readInt(u64, .little);
+                    try connections.append(connection);
+                }
             }
 
-            const has_metadata = try reader.readByte();
-            var local_metadata: []u8 = &.{};
-            if (has_metadata == 1) {
-                const metadata_len = try reader.readInt(u32, .little);
-                local_metadata = try self.allocator.alloc(u8, metadata_len);
-                try reader.readNoEof(local_metadata);
-                std.debug.print("Node {} metadata: {} bytes\n", .{id, metadata_len});
-            } else {
-                std.debug.print("Node {} has no metadata\n", .{id});
+            const metadata_len = try reader.readInt(u32, .little);
+            if (metadata_len > 1_000_000) {
+                return error.InvalidMetadataLength;
             }
 
-            var node = try Node.init(self.allocator, id, vector, local_metadata);
+            const node_metadata = try self.allocator.alloc(u8, metadata_len);
+            errdefer self.allocator.free(node_metadata);
+            try reader.readNoEof(node_metadata);
+            std.debug.print("Node {} metadata: {} bytes\n", .{id, metadata_len});
+
+            var node = try Node.init(self.allocator, id, vector, node_metadata);
             node.connections = connections;
             try self.nodes.put(id, node);
         }
