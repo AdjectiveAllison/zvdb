@@ -280,7 +280,7 @@ pub const HNSW = struct {
                 return error.InvalidMetadataLength;
             }
 
-            var node_metadata = try metadata.MetadataSchema.deserialize(self.allocator, reader);
+            const node_metadata = try metadata.MetadataSchema.deserialize(self.allocator, reader);
             var node = try Node.init(self.allocator, id, vector, node_metadata);
             node.connections = connections;
             try self.nodes.put(id, node);
