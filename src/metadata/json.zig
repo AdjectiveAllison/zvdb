@@ -12,7 +12,7 @@ pub const Metadata = struct {
     pub fn init(allocator: Allocator) Self {
         return Self{
             .allocator = allocator,
-            .data = json.Value{ .Object = json.ObjectMap.init(allocator) },
+            .data = json.Value{ .object = json.ObjectMap.init(allocator) },
         };
     }
 
@@ -21,11 +21,11 @@ pub const Metadata = struct {
     }
 
     pub fn set(self: *Self, key: []const u8, value: json.Value) !void {
-        try self.data.Object.put(key, value);
+        try self.data.object.put(key, value);
     }
 
     pub fn get(self: *const Self, key: []const u8) ?json.Value {
-        return self.data.Object.get(key);
+        return self.data.object.get(key);
     }
 
     pub fn validate(self: *const Self, schema: *const Schema) !void {
@@ -42,11 +42,10 @@ pub const Metadata = struct {
         var parser = json.Parser.init(allocator, false);
         defer parser.deinit();
 
-        const data = try parser.parse(json_string);
-
+        const parsed = try parser.parse(json_string);
         return Self{
             .allocator = allocator,
-            .data = data,
+            .data = parsed.value,
         };
     }
 };
