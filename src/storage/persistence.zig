@@ -95,7 +95,7 @@ pub const Persistence = struct {
 
         const reader = file.reader();
 
-        self.file_format.deinit(); // Clear any existing data
+        self.file_format.freeAllocatedMemory(); // Clear any existing data
         self.file_format = FileFormat.init(self.allocator);
 
         // Read and validate file header
@@ -125,6 +125,10 @@ pub const Persistence = struct {
 
         std.debug.print("Index data deserialized successfully\n", .{});
         std.debug.print("Loaded {} vectors\n", .{zvdb.index.getNodeCount()});
+
+        // Deserialize vectors and metadata
+        try zvdb.memory_storage.deserializeVectors(self.allocator, self.file_format.vector_data);
+        try zvdb.memory_storage.deserializeMetadata(self.allocator, self.file_format.metadata);
     }
     fn validateFileHeader(self: *Self) !void {
         if (!std.mem.eql(u8, &self.file_format.header.magic_number, "ZVDB")) {

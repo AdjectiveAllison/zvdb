@@ -41,6 +41,13 @@ pub const FileFormat = struct {
         }
     }
 
+    pub fn freeAllocatedMemory(self: *Self) void {
+        self.deinit();
+        self.vector_data = &[_]u8{};
+        self.metadata = &[_]u8{};
+        self.index_data = &[_]u8{};
+    }
+
     pub fn write(self: *const Self, writer: anytype) !void {
         std.debug.print("Writing file format: vector_count={}, vector_data={} bytes, metadata={} bytes, index_data={} bytes\n", .{
             self.vector_count,

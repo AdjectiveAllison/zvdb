@@ -143,10 +143,21 @@ pub const ZVDB = struct {
             return error.EmptyFile;
         }
 
-        try self.persistence.load(self, file_path);
-        std.debug.print("Database loaded successfully\n", .{});
-        std.debug.print("Loaded ZVDB: {} vectors in memory storage\n", .{self.memory_storage.count()});
-     }
+        self.memory_storage.clear(); // Clear existing data before loading
+
+        const load_result = self.persistence.load(self, file_path);
+        if (load_result) |_| {
+            std.debug.print("Database loaded successfully\n", .{});
+            std.debug.print("Loaded ZVDB: {} vectors in memory storage\n", .{self.memory_storage.count()});
+        } else |err| {
+            std.debug.print("Error loading database: {}\n", .{err});
+            // Clean up partially loaded data
+            self.memory_storage.clear();
+            self.index.deinit();
+            self.index = try index.createIndex(self.allocator, self.config.index_config);
+            return err;
+        }
+    }
 };
 
 pub const SearchResult = struct {
