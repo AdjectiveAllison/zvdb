@@ -27,6 +27,8 @@ pub const Persistence = struct {
     }
 
     pub fn save(self: *Self, zvdb: *ZVDB, file_path: []const u8) !void {
+        std.debug.print("Saving ZVDB to file: {s}\n", .{file_path});
+
         // Prepare file format data
         self.file_format.header = .{
             .magic_number = "ZVDB".*,
@@ -36,6 +38,10 @@ pub const Persistence = struct {
             .index_type = @intFromEnum(zvdb.config.index_config),
         };
 
+        std.debug.print("File header prepared: magic={s}, version={}, dimension={}, distance_function={}, index_type={}\n",
+            .{self.file_format.header.magic_number, self.file_format.header.version, self.file_format.header.dimension,
+             self.file_format.header.distance_function, self.file_format.header.index_type});
+
         // Serialize index data
         var index_data = std.ArrayList(u8).init(self.allocator);
         defer index_data.deinit();
@@ -44,20 +50,30 @@ pub const Persistence = struct {
         try zvdb.index.serialize(&any_writer);
         self.file_format.index_data = try index_data.toOwnedSlice();
 
+        std.debug.print("Index data serialized: {} bytes\n", .{self.file_format.index_data.len});
+
         // Write to file
         const file = try std.fs.cwd().createFile(file_path, .{});
         defer file.close();
 
         const writer = file.writer();
         try self.file_format.write(writer);
+
+        std.debug.print("File written successfully\n", .{});
     }
 
     pub fn load(self: *Self, zvdb: *ZVDB, file_path: []const u8) !void {
+        std.debug.print("Loading ZVDB from file: {s}\n", .{file_path});
+
         const file = try std.fs.cwd().openFile(file_path, .{});
         defer file.close();
 
         const reader = file.reader();
         try self.file_format.read(reader);
+
+        std.debug.print("File header read: magic={s}, version={}, dimension={}, distance_function={}, index_type={}\n",
+            .{self.file_format.header.magic_number, self.file_format.header.version, self.file_format.header.dimension,
+             self.file_format.header.distance_function, self.file_format.header.index_type});
 
         // Validate file format
         if (!std.mem.eql(u8, &self.file_format.header.magic_number, "ZVDB")) {
@@ -72,10 +88,15 @@ pub const Persistence = struct {
         zvdb.config.dimension = self.file_format.header.dimension;
         zvdb.config.distance_metric = @enumFromInt(self.file_format.header.distance_function);
 
+        std.debug.print("ZVDB configuration updated\n", .{});
+
         // Deserialize index data
+        std.debug.print("Index data size: {} bytes\n", .{self.file_format.index_data.len});
         var index_stream = std.io.fixedBufferStream(self.file_format.index_data);
         const index_reader = index_stream.reader();
         var any_reader = index_reader.any();
         try zvdb.index.deserialize(&any_reader);
+
+        std.debug.print("Index data deserialized successfully\n", .{});
     }
 };

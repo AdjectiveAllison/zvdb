@@ -179,9 +179,8 @@ pub const HNSW = struct {
     }
 
     pub fn serialize(self: *HNSW, writer: anytype) !void {
-        // Write basic information
-        try writer.writeInt(usize, self.nodes.count(), .little);
-        try writer.writeInt(usize, self.max_level, .little);
+        try writer.writeInt(u64, self.nodes.count(), .little);
+        try writer.writeInt(u64, self.max_level, .little);
         if (self.entry_point) |entry_point| {
             try writer.writeByte(1);
             try writer.writeInt(u64, entry_point, .little);
@@ -189,27 +188,23 @@ pub const HNSW = struct {
             try writer.writeByte(0);
         }
 
-        // Write nodes
         var it = self.nodes.iterator();
         while (it.next()) |entry| {
             const id = entry.key_ptr.*;
             const node = entry.value_ptr.*;
 
             try writer.writeInt(u64, id, .little);
-            try writer.writeInt(usize, node.vector.len, .little);
+            try writer.writeInt(u32, @intCast(node.vector.len), .little);
             for (node.vector) |value| {
                 try writer.writeInt(u32, @bitCast(value), .little);
             }
-
-            try writer.writeInt(usize, node.connections.items.len, .little);
+            try writer.writeInt(u32, @intCast(node.connections.items.len), .little);
             for (node.connections.items) |connection| {
                 try writer.writeInt(u64, connection, .little);
             }
-
-            // Serialize metadata
             if (node.metadata.len > 0) {
                 try writer.writeByte(1);
-                try writer.writeInt(usize, node.metadata.len, .little);
+                try writer.writeInt(u32, @intCast(node.metadata.len), .little);
                 try writer.writeAll(node.metadata);
             } else {
                 try writer.writeByte(0);
@@ -218,12 +213,8 @@ pub const HNSW = struct {
     }
 
     pub fn deserialize(self: *HNSW, reader: anytype) !void {
-        // Clear existing data
-        self.deinit();
-        self.nodes = AutoHashMap(u64, *Node).init(self.allocator);
-
-        const node_count = try reader.readInt(usize, .little);
-        self.max_level = try reader.readInt(usize, .little);
+        const node_count = try reader.readInt(u64, .little);
+        self.max_level = try reader.readInt(u64, .little);
         const has_entry_point = try reader.readByte();
         if (has_entry_point == 1) {
             self.entry_point = try reader.readInt(u64, .little);
@@ -231,11 +222,10 @@ pub const HNSW = struct {
             self.entry_point = null;
         }
 
-        // Read nodes
-        var i: usize = 0;
+        var i: u64 = 0;
         while (i < node_count) : (i += 1) {
             const id = try reader.readInt(u64, .little);
-            const vector_len = try reader.readInt(usize, .little);
+            const vector_len = try reader.readInt(u32, .little);
             const vector = try self.allocator.alloc(f32, vector_len);
             errdefer self.allocator.free(vector);
 
@@ -244,25 +234,26 @@ pub const HNSW = struct {
                 value.* = @bitCast(bits);
             }
 
-            var node = try Node.init(self.allocator, id, vector, &[_]u8{});
-            errdefer node.deinit(self.allocator);
+            const connections_len = try reader.readInt(u32, .little);
+            var connections = try std.ArrayList(u64).initCapacity(self.allocator, connections_len);
+            errdefer connections.deinit();
 
-            const connection_count = try reader.readInt(usize, .little);
-            try node.connections.ensureTotalCapacity(connection_count);
-            var j: usize = 0;
-            while (j < connection_count) : (j += 1) {
+            var j: u32 = 0;
+            while (j < connections_len) : (j += 1) {
                 const connection = try reader.readInt(u64, .little);
-                try node.connections.append(connection);
+                try connections.append(connection);
             }
 
-            // Deserialize metadata
             const has_metadata = try reader.readByte();
+            var local_metadata: []u8 = &.{};
             if (has_metadata == 1) {
-                const metadata_len = try reader.readInt(usize, .little);
-                node.metadata = try self.allocator.alloc(u8, metadata_len);
-                try reader.readNoEof(node.metadata);
+                const metadata_len = try reader.readInt(u32, .little);
+                local_metadata = try self.allocator.alloc(u8, metadata_len);
+                try reader.readNoEof(local_metadata);
             }
 
+            var node = try Node.init(self.allocator, id, vector, local_metadata);
+            node.connections = connections;
             try self.nodes.put(id, node);
         }
     }
