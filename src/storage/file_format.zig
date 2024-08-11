@@ -92,8 +92,11 @@ pub const FileFormat = struct {
         };
         std.debug.print("Read metadata size: {} bytes\n", .{metadata_size});
         if (metadata_size > 10_000_000_000) { // 10 GB limit
-            std.debug.print("Metadata size exceeds limit of 10 GB\n", .{});
+            std.debug.print("Metadata size exceeds limit of 10 GB. Read size: {} bytes\n", .{metadata_size});
             return error.MetadataTooLarge;
+        }
+        if (metadata_size == 0) {
+            std.debug.print("Warning: Metadata size is 0\n", .{});
         }
         if (metadata_size == 0) {
             std.debug.print("Warning: Metadata size is 0\n", .{});

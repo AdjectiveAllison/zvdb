@@ -93,6 +93,11 @@ pub const Persistence = struct {
             return error.EmptyFile;
         }
 
+        if (file_size < @sizeOf(FileFormat.FileHeader)) {
+            std.debug.print("File size is too small to contain a valid header\n", .{});
+            return error.InvalidFileSize;
+        }
+
         const reader = file.reader();
 
         self.file_format.freeAllocatedMemory(); // Clear any existing data
