@@ -106,8 +106,12 @@ pub const FileFormat = struct {
         }
         std.debug.print("Allocated memory for metadata: {} bytes\n", .{self.metadata.len});
         errdefer self.allocator.free(self.metadata);
-        const metadata_bytes_read = try reader.readAll(self.metadata);
+        const metadata_bytes_read = reader.readAll(self.metadata) catch |err| {
+            std.debug.print("Error reading metadata: {}\n", .{err});
+            return err;
+        };
         if (metadata_bytes_read != metadata_size) {
+            std.debug.print("Incomplete metadata read. Expected {} bytes, got {} bytes\n", .{metadata_size, metadata_bytes_read});
             return error.IncompleteRead;
         }
 
