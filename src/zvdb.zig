@@ -2,15 +2,15 @@ const std = @import("std");
 const json = std.json;
 const Allocator = std.mem.Allocator;
 
-const config = @import("config.zig");
-const index = @import("index/index.zig");
-const distance = @import("distance/distance.zig");
-const DistanceMetric = distance.DistanceMetric;
-const storage = @import("storage/persistence.zig");
-const memory = @import("storage/memory.zig");
-const metadata = struct {
-    const schema = @import("metadata/schema.zig");
-    const json = @import("metadata/json.zig");
+pub const config = @import("config.zig");
+pub const index = @import("index/index.zig");
+pub const distance = @import("distance/distance.zig");
+pub const DistanceMetric = distance.DistanceMetric;
+pub const storage = @import("storage/persistence.zig");
+pub const memory = @import("storage/memory.zig");
+pub const metadata = struct {
+    pub const schema = @import("metadata/schema.zig");
+    pub const json = @import("metadata/json.zig");
 };
 
 pub const ZVDB = struct {
