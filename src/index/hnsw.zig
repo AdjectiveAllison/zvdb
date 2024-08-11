@@ -115,7 +115,7 @@ pub const HNSW = struct {
 
         // Update entry point if necessary
         if (level > self.max_level) {
-            self.entry_point = id;
+            self.entry_point = new_id;
         }
 
         try self.nodes.put(new_id, new_node);
