@@ -81,7 +81,7 @@ pub const HNSW = struct {
 
     pub fn addItem(self: *Self, vector: []const f32, md: ?*const metadata.MetadataSchema) !u64 {
         const new_id: u64 = @intCast(self.nodes.count());
-        const new_metadata = if (md) |m| try m.clone(self.allocator) else metadata.MetadataSchema.init(self.allocator);
+        const new_metadata = if (md) |m| try m.clone(self.allocator) else try metadata.MetadataSchema.init(self.allocator);
         const new_node = try Node.init(self.allocator, new_id, vector, new_metadata);
         errdefer new_node.deinit(self.allocator);
 
@@ -288,7 +288,7 @@ pub const HNSW = struct {
             try metadata_buffer.appendNTimes(0, metadata_len);
             _ = try reader.readAll(metadata_buffer.items);
             const node_metadata = metadata.MetadataSchema.deserialize(self.allocator, metadata_buffer.items);
-            var node = try Node.init(self.allocator, id, vector, node_metadata);
+            var node = try Node.init(self.allocator, id, vector, try node_metadata);
             node.connections = connections;
             try self.nodes.put(id, node);
         }
