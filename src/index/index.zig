@@ -77,11 +77,13 @@ fn deinitHNSW(ptr: *anyopaque) void {
     // Note: We need to free the memory allocated for the HNSW struct itself
     std.heap.page_allocator.destroy(self);
 }
+
 fn addHNSW(ptr: *anyopaque, vector: []const f32) Allocator.Error!u64 {
     const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
     // Generate a new ID for the vector
     const new_id: u64 = @intCast(self.nodes.count());
-    return self.addItem(new_id, vector);
+    try self.addItem(new_id, vector);
+    return new_id;
 }
 
 fn searchHNSW(allocator: std.mem.Allocator, ptr: *anyopaque, query: []const f32, limit: usize) Allocator.Error![]SearchResult {
