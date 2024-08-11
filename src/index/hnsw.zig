@@ -179,13 +179,16 @@ pub const HNSW = struct {
     }
 
     pub fn serialize(self: *HNSW, writer: anytype) !void {
+        std.debug.print("Serializing HNSW: node count={}, max_level={}\n", .{self.nodes.count(), self.max_level});
         try writer.writeInt(u64, self.nodes.count(), .little);
         try writer.writeInt(u64, self.max_level, .little);
         if (self.entry_point) |entry_point| {
             try writer.writeByte(1);
             try writer.writeInt(u64, entry_point, .little);
+            std.debug.print("Entry point: {}\n", .{entry_point});
         } else {
             try writer.writeByte(0);
+            std.debug.print("No entry point\n", .{});
         }
 
         var it = self.nodes.iterator();
@@ -193,6 +196,7 @@ pub const HNSW = struct {
             const id = entry.key_ptr.*;
             const node = entry.value_ptr.*;
 
+            std.debug.print("Serializing node {}: vector len={}, connections={}\n", .{id, node.vector.len, node.connections.items.len});
             try writer.writeInt(u64, id, .little);
             try writer.writeInt(u32, @intCast(node.vector.len), .little);
             for (node.vector) |value| {
@@ -206,26 +210,35 @@ pub const HNSW = struct {
                 try writer.writeByte(1);
                 try writer.writeInt(u32, @intCast(node.metadata.len), .little);
                 try writer.writeAll(node.metadata);
+                std.debug.print("Node {} metadata: {} bytes\n", .{id, node.metadata.len});
             } else {
                 try writer.writeByte(0);
+                std.debug.print("Node {} has no metadata\n", .{id});
             }
         }
+        std.debug.print("HNSW serialization complete\n", .{});
     }
 
     pub fn deserialize(self: *HNSW, reader: anytype) !void {
         const node_count = try reader.readInt(u64, .little);
         self.max_level = try reader.readInt(u64, .little);
+        std.debug.print("Deserializing HNSW: node count={}, max_level={}\n", .{node_count, self.max_level});
+
         const has_entry_point = try reader.readByte();
         if (has_entry_point == 1) {
             self.entry_point = try reader.readInt(u64, .little);
+            std.debug.print("Entry point: {}\n", .{self.entry_point.?});
         } else {
             self.entry_point = null;
+            std.debug.print("No entry point\n", .{});
         }
 
         var i: u64 = 0;
         while (i < node_count) : (i += 1) {
             const id = try reader.readInt(u64, .little);
             const vector_len = try reader.readInt(u32, .little);
+            std.debug.print("Deserializing node {}: vector len={}\n", .{id, vector_len});
+
             const vector = try self.allocator.alloc(f32, vector_len);
             errdefer self.allocator.free(vector);
 
@@ -235,6 +248,7 @@ pub const HNSW = struct {
             }
 
             const connections_len = try reader.readInt(u32, .little);
+            std.debug.print("Node {} connections: {}\n", .{id, connections_len});
             var connections = try std.ArrayList(u64).initCapacity(self.allocator, connections_len);
             errdefer connections.deinit();
 
@@ -250,12 +264,16 @@ pub const HNSW = struct {
                 const metadata_len = try reader.readInt(u32, .little);
                 local_metadata = try self.allocator.alloc(u8, metadata_len);
                 try reader.readNoEof(local_metadata);
+                std.debug.print("Node {} metadata: {} bytes\n", .{id, metadata_len});
+            } else {
+                std.debug.print("Node {} has no metadata\n", .{id});
             }
 
             var node = try Node.init(self.allocator, id, vector, local_metadata);
             node.connections = connections;
             try self.nodes.put(id, node);
         }
+        std.debug.print("HNSW deserialization complete\n", .{});
     }
 
     pub fn updateItem(self: *Self, id: u64, vector: []const f32) !void {
@@ -322,6 +340,10 @@ pub const HNSW = struct {
         }
 
         return result;
+    }
+
+    pub fn getNodeCount(self: *HNSW) usize {
+        return self.nodes.count();
     }
 
     fn randomLevel(self: *Self) usize {

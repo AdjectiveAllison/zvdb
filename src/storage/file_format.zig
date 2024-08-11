@@ -37,6 +37,12 @@ pub const FileFormat = struct {
     }
 
     pub fn write(self: *const Self, writer: anytype) !void {
+        std.debug.print("Writing file format: vector_count={}, vector_data={} bytes, metadata={} bytes, index_data={} bytes\n", .{
+            self.vector_count,
+            self.vector_data.len,
+            self.metadata.len,
+            self.index_data.len,
+        });
         try writer.writeAll(&self.header.magic_number);
         try writer.writeInt(u32, self.header.version, .little);
         try writer.writeInt(u32, self.header.dimension, .little);
@@ -69,5 +75,11 @@ pub const FileFormat = struct {
         const metadata_size = remaining_data.items.len / 2;
         self.metadata = try self.allocator.dupe(u8, remaining_data.items[0..metadata_size]);
         self.index_data = try self.allocator.dupe(u8, remaining_data.items[metadata_size..]);
+        std.debug.print("Read file format: vector_count={}, vector_data={} bytes, metadata={} bytes, index_data={} bytes\n", .{
+            self.vector_count,
+            self.vector_data.len,
+            self.metadata.len,
+            self.index_data.len,
+        });
     }
 };

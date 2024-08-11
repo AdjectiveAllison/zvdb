@@ -28,6 +28,7 @@ pub const Persistence = struct {
 
     pub fn save(self: *Self, zvdb: *ZVDB, file_path: []const u8) !void {
         std.debug.print("Saving ZVDB to file: {s}\n", .{file_path});
+        std.debug.print("Total nodes before serialization: {}\n", .{zvdb.index.getNodeCount()});
 
         // Prepare file format data
         self.file_format.header = .{
@@ -38,6 +39,12 @@ pub const Persistence = struct {
             .index_type = @intFromEnum(zvdb.config.index_config),
         };
 
+
+        std.debug.print("Preparing file format data:\n", .{});
+        std.debug.print("  Vector count: {}\n", .{zvdb.memory_storage.count()});
+        std.debug.print("  Vector data size: {} bytes\n", .{self.file_format.vector_data.len});
+        std.debug.print("  Metadata size: {} bytes\n", .{self.file_format.metadata.len});
+        std.debug.print("  Index data size: {} bytes\n", .{self.file_format.index_data.len});
         std.debug.print("File header prepared: magic={s}, version={}, dimension={}, distance_function={}, index_type={}\n",
             .{self.file_format.header.magic_number, self.file_format.header.version, self.file_format.header.dimension,
              self.file_format.header.distance_function, self.file_format.header.index_type});
@@ -60,6 +67,11 @@ pub const Persistence = struct {
         try self.file_format.write(writer);
 
         std.debug.print("File written successfully\n", .{});
+        std.debug.print("Total size of serialized data: {} bytes\n", .{
+            self.file_format.vector_data.len +
+            self.file_format.metadata.len +
+            self.file_format.index_data.len
+        });
     }
 
     pub fn load(self: *Self, zvdb: *ZVDB, file_path: []const u8) !void {
@@ -91,12 +103,19 @@ pub const Persistence = struct {
         std.debug.print("ZVDB configuration updated\n", .{});
 
         // Deserialize index data
-        std.debug.print("Index data size: {} bytes\n", .{self.file_format.index_data.len});
+        std.debug.print("Index data size before deserialization: {} bytes\n", .{self.file_format.index_data.len});
+
         var index_stream = std.io.fixedBufferStream(self.file_format.index_data);
         const index_reader = index_stream.reader();
         var any_reader = index_reader.any();
         try zvdb.index.deserialize(&any_reader);
 
         std.debug.print("Index data deserialized successfully\n", .{});
+
+        std.debug.print("Loaded file format data:\n", .{});
+        std.debug.print("  Vector count: {}\n", .{self.file_format.vector_count});
+        std.debug.print("  Vector data size: {} bytes\n", .{self.file_format.vector_data.len});
+        std.debug.print("  Metadata size: {} bytes\n", .{self.file_format.metadata.len});
+        std.debug.print("  Index data size: {} bytes\n", .{self.file_format.index_data.len});
     }
 };

@@ -105,6 +105,7 @@ pub fn main() !void {
     std.debug.print("Deleted vector with ID: {}\n", .{id2});
 
     // Save the database to disk
+    std.debug.print("Total nodes before saving: {}\n", .{db.index.getNodeCount()});
     try db.save("zvdb_data.bin");
     std.debug.print("Database saved to disk\n", .{});
 
@@ -113,6 +114,7 @@ pub fn main() !void {
     defer loaded_db.deinit();
     try loaded_db.load("zvdb_data.bin");
     std.debug.print("Database loaded from disk\n", .{});
+    std.debug.print("Total nodes after loading: {}\n", .{loaded_db.index.getNodeCount()});
 
     // Perform a search on the loaded database
     const loaded_search_results = try loaded_db.search(&query, 2);

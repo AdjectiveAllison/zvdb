@@ -61,6 +61,7 @@ pub const ZVDB = struct {
         const id = try self.index.add(vector);
 
         try self.memory_storage.add(id, vector, new_metadata);
+        std.debug.print("Added node. Total nodes: {}\n", .{self.index.getNodeCount()});
         return id;
     }
 
@@ -124,6 +125,7 @@ pub const ZVDB = struct {
 
     pub fn save(self: *Self, file_path: []const u8) !void {
         std.debug.print("Saving database to file: {s}\n", .{file_path});
+        std.debug.print("Saving ZVDB: {} vectors in memory storage\n", .{self.memory_storage.count()});
         try self.persistence.save(self, file_path);
         std.debug.print("Database saved successfully\n", .{});
     }
@@ -143,7 +145,8 @@ pub const ZVDB = struct {
 
         try self.persistence.load(self, file_path);
         std.debug.print("Database loaded successfully\n", .{});
-    }
+        std.debug.print("Loaded ZVDB: {} vectors in memory storage\n", .{self.memory_storage.count()});
+     }
 };
 
 pub const SearchResult = struct {

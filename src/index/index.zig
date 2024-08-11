@@ -26,6 +26,7 @@ pub const Index = struct {
         updateFn: *const fn (ptr: *anyopaque, id: u64, vector: []const f32) (Allocator.Error || error{NodeNotFound})!void,
         serializeFn: *const fn (ptr: *anyopaque, writer: *std.io.AnyWriter) anyerror!void,
         deserializeFn: *const fn (ptr: *anyopaque, reader: *std.io.AnyReader) anyerror!void,
+        getNodeCountFn: *const fn (ptr: *anyopaque) usize,
     };
 
 
@@ -55,6 +56,10 @@ pub const Index = struct {
 
     pub fn deserialize(self: *Index, reader: *std.io.AnyReader) !void {
         return self.vtable.deserializeFn(self.ptr, reader);
+    }
+
+    pub fn getNodeCount(self: *Index) usize {
+        return self.vtable.getNodeCountFn(self.ptr);
     }
 };
 
@@ -86,6 +91,7 @@ pub fn createIndex(allocator: Allocator, index_config: IndexConfig) Allocator.Er
                 .updateFn = &updateHNSW,
                 .serializeFn = &serializeHNSW,
                 .deserializeFn = &deserializeHNSW,
+                .getNodeCountFn = &getNodeCountHNSW,
             };
 
             return Index{
@@ -147,4 +153,9 @@ fn serializeHNSW(ptr: *anyopaque, writer: *std.io.AnyWriter) !void {
 fn deserializeHNSW(ptr: *anyopaque, reader: *std.io.AnyReader) !void {
     const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
     try self.deserialize(reader);
+}
+
+fn getNodeCountHNSW(ptr: *anyopaque) usize {
+    const self = @as(*hnsw.HNSW, @ptrCast(@alignCast(ptr)));
+    return self.getNodeCount();
 }
