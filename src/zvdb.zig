@@ -123,11 +123,26 @@ pub const ZVDB = struct {
     }
 
     pub fn save(self: *Self, file_path: []const u8) !void {
+        std.debug.print("Saving database to file: {s}\n", .{file_path});
         try self.persistence.save(self, file_path);
+        std.debug.print("Database saved successfully\n", .{});
     }
 
     pub fn load(self: *Self, file_path: []const u8) !void {
+        std.debug.print("Loading database from file: {s}\n", .{file_path});
+
+        const file = try std.fs.cwd().openFile(file_path, .{});
+        defer file.close();
+
+        const file_size = try file.getEndPos();
+        std.debug.print("File size: {} bytes\n", .{file_size});
+
+        if (file_size == 0) {
+            return error.EmptyFile;
+        }
+
         try self.persistence.load(self, file_path);
+        std.debug.print("Database loaded successfully\n", .{});
     }
 };
 

@@ -205,19 +205,24 @@ pub const HNSW = struct {
             for (node.connections.items) |connection| {
                 try writer.writeInt(u64, connection, .little);
             }
+
+            // Serialize metadata
+            if (node.metadata.len > 0) {
+                try writer.writeByte(1);
+                try writer.writeInt(usize, node.metadata.len, .little);
+                try writer.writeAll(node.metadata);
+            } else {
+                try writer.writeByte(0);
+            }
         }
     }
 
     pub fn deserialize(self: *HNSW, reader: anytype) !void {
-        self.deinit(); // Clear existing data
+        // Clear existing data
+        self.deinit();
         self.nodes = AutoHashMap(u64, *Node).init(self.allocator);
 
-        const node_count = reader.readInt(usize, .little) catch |err| {
-            if (err == error.EndOfStream) {
-                return error.InvalidOrEmptyFile;
-            }
-            return err;
-        };
+        const node_count = try reader.readInt(usize, .little);
         self.max_level = try reader.readInt(usize, .little);
         const has_entry_point = try reader.readByte();
         if (has_entry_point == 1) {
@@ -230,26 +235,17 @@ pub const HNSW = struct {
         var i: usize = 0;
         while (i < node_count) : (i += 1) {
             const id = try reader.readInt(u64, .little);
-            const vector_len = reader.readInt(usize, .little) catch |err| {
-                if (err == error.EndOfStream) {
-                    // Handle the case where the file is empty or we've reached the end
-                    return error.InvalidOrEmptyFile;
-                }
-                return err;
-            };
+            const vector_len = try reader.readInt(usize, .little);
             const vector = try self.allocator.alloc(f32, vector_len);
+            errdefer self.allocator.free(vector);
+
             for (vector) |*value| {
                 const bits = try reader.readInt(u32, .little);
                 value.* = @bitCast(bits);
             }
 
-            var node = try self.allocator.create(Node);
-            node.* = Node{
-                .id = node.id,
-                .vector = node.vector,
-                .connections = node.connections,
-                .metadata = node.metadata,
-            };
+            var node = try Node.init(self.allocator, id, vector, &[_]u8{});
+            errdefer node.deinit(self.allocator);
 
             const connection_count = try reader.readInt(usize, .little);
             try node.connections.ensureTotalCapacity(connection_count);
@@ -257,6 +253,14 @@ pub const HNSW = struct {
             while (j < connection_count) : (j += 1) {
                 const connection = try reader.readInt(u64, .little);
                 try node.connections.append(connection);
+            }
+
+            // Deserialize metadata
+            const has_metadata = try reader.readByte();
+            if (has_metadata == 1) {
+                const metadata_len = try reader.readInt(usize, .little);
+                node.metadata = try self.allocator.alloc(u8, metadata_len);
+                try reader.readNoEof(node.metadata);
             }
 
             try self.nodes.put(id, node);
