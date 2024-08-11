@@ -91,6 +91,44 @@ pub const MemoryStorage = struct {
         return self.vectors.count();
     }
 
+    pub fn serializeVectors(self: *const Self, allocator: Allocator) ![]u8 {
+        var serialized_data = std.ArrayList(u8).init(allocator);
+        errdefer serialized_data.deinit();
+
+        var it = self.vectors.iterator();
+        while (it.next()) |entry| {
+            const id = entry.key_ptr.*;
+            const vector = entry.value_ptr.*;
+
+            try serialized_data.writer().writeInt(u64, id, .little);
+            try serialized_data.writer().writeInt(u32, @intCast(vector.len), .little);
+            for (vector) |value| {
+                try serialized_data.writer().writeInt(f32, value, .little);
+            }
+        }
+
+        return serialized_data.toOwnedSlice();
+    }
+
+    pub fn serializeMetadata(self: *const Self, allocator: Allocator) ![]u8 {
+        var serialized_data = std.ArrayList(u8).init(allocator);
+        errdefer serialized_data.deinit();
+
+        var it = self.metadata.iterator();
+        while (it.next()) |entry| {
+            const id = entry.key_ptr.*;
+            const md = entry.value_ptr.*;
+
+            try serialized_data.writer().writeInt(u64, id, .little);
+            const md_json = try std.json.stringifyAlloc(allocator, md.*, .{});
+            defer allocator.free(md_json);
+            try serialized_data.writer().writeInt(u32, @intCast(md_json.len), .little);
+            try serialized_data.writer().writeAll(md_json);
+        }
+
+        return serialized_data.toOwnedSlice();
+    }
+
     pub fn clone(self: *const Self, allocator: Allocator) !*metadata.MetadataSchema {
         var new_metadata = try allocator.create(metadata.MetadataSchema);
         new_metadata.* = .{

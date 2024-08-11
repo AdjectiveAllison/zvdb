@@ -42,7 +42,9 @@ pub const Persistence = struct {
         const vector_count = zvdb.memory_storage.count();
         self.file_format.vector_count = vector_count;
         self.file_format.vector_data = try zvdb.memory_storage.serializeVectors(self.allocator);
+        errdefer self.allocator.free(self.file_format.vector_data);
         self.file_format.metadata = try zvdb.memory_storage.serializeMetadata(self.allocator);
+        errdefer self.allocator.free(self.file_format.metadata);
 
         std.debug.print("Preparing file format data:\n", .{});
         std.debug.print("  Vector count: {}\n", .{vector_count});
