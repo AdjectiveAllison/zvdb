@@ -75,9 +75,9 @@ pub const HNSW = struct {
 
         // If this is the first node, make it the entry point
         if (self.entry_point == null) {
-            self.entry_point = id;
-            try self.nodes.put(id, new_node);
-            return;
+            self.entry_point = new_id;
+            try self.nodes.put(new_id, new_node);
+            return new_id;
         }
 
         // Find entry point
