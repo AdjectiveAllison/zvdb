@@ -19,6 +19,7 @@ pub const ZVDB = struct {
 
     const Self = @This();
 
+
     pub fn init(allocator: Allocator, zvdb_config: config.Config) !*Self {
         const self = try allocator.create(Self);
         errdefer allocator.destroy(self);
@@ -26,10 +27,11 @@ pub const ZVDB = struct {
         self.* = .{
             .allocator = allocator,
             .index = undefined,
-            .config = zvdb_config,
+            .config = zvdb_config,  // We're now passing in a fully initialized Config
             .persistence = storage.Persistence.init(allocator),
             .memory_storage = memory.MemoryStorage.init(allocator),
         };
+
 
         errdefer self.deinit();
 

@@ -22,12 +22,13 @@ pub const MetadataSchema = struct {
     }
 
     pub fn deinit(self: *Self) void {
-        if (self.name) |name| self.allocator.free(name);
+        if (self.name) |name| {
+            self.allocator.free(name);
+        }
         for (self.tags.items) |tag| {
             self.allocator.free(tag);
         }
         self.tags.deinit();
-        self.allocator.destroy(self);
     }
 
     pub fn validate(self: *const Self) !void {
@@ -78,5 +79,12 @@ pub const MetadataSchema = struct {
 
     pub fn addTag(self: *Self, tag: []const u8) !void {
         try self.tags.append(try self.allocator.dupe(u8, tag));
+    }
+
+    pub fn setName(self: *Self, name: []const u8) !void {
+        if (self.name) |old_name| {
+            self.allocator.free(old_name);
+        }
+        self.name = try self.allocator.dupe(u8, name);
     }
 };

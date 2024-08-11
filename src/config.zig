@@ -16,14 +16,20 @@ pub const Config = struct {
         distance_metric: DistanceMetric,
         index_config: index.IndexConfig,
         storage_path: ?[]const u8,
-    ) Config {
-        return .{
+    ) !Config {
+        var config = Config{
             .allocator = allocator,
             .dimension = dimension,
             .distance_metric = distance_metric,
             .index_config = index_config,
-            .storage_path = storage_path,
+            .storage_path = null,
         };
+
+        if (storage_path) |path| {
+            config.storage_path = try allocator.dupe(u8, path);
+        }
+
+        return config;
     }
 
     pub fn deinit(self: *Config) void {

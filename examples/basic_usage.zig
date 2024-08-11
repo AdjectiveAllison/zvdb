@@ -8,37 +8,45 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     // Configure ZVDB
-    const zvdb_config = zvdb.config.Config.init(allocator, 3, .Euclidean, .{ .HNSW = .{
-        .max_connections = 16,
-        .ef_construction = 200,
-        .ef_search = 50,
-    } }, "zvdb_data.bin");
+    const zvdb_config = try zvdb.config.Config.init(
+        allocator,
+        3,
+        .Euclidean,
+        .{ .HNSW = .{
+            .max_connections = 16,
+            .ef_construction = 200,
+            .ef_search = 50,
+        } },
+        "zvdb_data.bin",
+    );
 
     // Initialize ZVDB
     var db = try zvdb.ZVDB.init(allocator, zvdb_config);
     defer db.deinit();
 
     // Add vectors with metadata
-     const vector1 = [_]f32{ 1.0, 2.0, 3.0 };
-     var metadata1 = try zvdb.metadata.MetadataSchema.init(allocator);
-     defer metadata1.deinit();
-     metadata1.name = try allocator.dupe(u8, "Point A");
-     metadata1.value = 42.0;
-     try metadata1.addTag("tag1");
-     try metadata1.addTag("tag2");
+    const vector1 = [_]f32{ 1.0, 2.0, 3.0 };
+    var metadata1 = try zvdb.metadata.MetadataSchema.init(allocator);
+    defer metadata1.deinit();
+    try metadata1.setName("Point A");
+    metadata1.value = 42.0;
+    try metadata1.addTag("tag1");
+    try metadata1.addTag("tag2");
 
-     const id1 = try db.add(&vector1, metadata1);
-     std.debug.print("Added vector with ID: {}\n", .{id1});
+    // ... and similarly for metadata2 ...
 
-     const vector2 = [_]f32{ 4.0, 5.0, 6.0 };
-     var metadata2 = try zvdb.metadata.MetadataSchema.init(allocator);
-     defer metadata2.deinit();
-     metadata2.name = try allocator.dupe(u8, "Point B");
-     metadata2.value = 73.0;
-     try metadata2.addTag("tag3");
+    const id1 = try db.add(&vector1, metadata1);
+    std.debug.print("Added vector with ID: {}\n", .{id1});
 
-     const id2 = try db.add(&vector2, metadata2);
-     std.debug.print("Added vector with ID: {}\n", .{id2});
+    const vector2 = [_]f32{ 4.0, 5.0, 6.0 };
+    var metadata2 = try zvdb.metadata.MetadataSchema.init(allocator);
+    defer metadata2.deinit();
+    try metadata2.setName("Point B");
+    metadata2.value = 73.0;
+    try metadata2.addTag("tag3");
+
+    const id2 = try db.add(&vector2, metadata2);
+    std.debug.print("Added vector with ID: {}\n", .{id2});
 
     // Perform a search
     const query = [_]f32{ 2.0, 3.0, 4.0 };
