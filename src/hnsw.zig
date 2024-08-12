@@ -1,4 +1,5 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const AutoHashMap = std.AutoHashMap;
@@ -183,13 +184,57 @@ pub fn HNSW(comptime T: type) type {
             if (a.len != b.len) {
                 @panic("Mismatched dimensions in distance calculation");
             }
+            return if (comptime canUseSIMD(T)) simdDistance(a, b) else scalarDistance(a, b);
+        }
+
+        fn scalarDistance(a: []const T, b: []const T) T {
             var sum: T = 0;
             for (a, 0..) |_, i| {
                 const diff = a[i] - b[i];
                 sum += diff * diff;
             }
-            return sum; // Note: We're returning squared distance for efficiency
+            return sum;
         }
+
+        fn simdDistance(a: []const T, b: []const T) T {
+            const len = a.len;
+            const SimdVec = @Vector(SIMD_WIDTH, T);
+            var sum: SimdVec = @splat(0);
+
+            var i: usize = 0;
+            while (i + SIMD_WIDTH <= len) : (i += SIMD_WIDTH) {
+                const va = @as(SimdVec, a[i..][0..SIMD_WIDTH].*);
+                const vb = @as(SimdVec, b[i..][0..SIMD_WIDTH].*);
+                const diff = va - vb;
+                sum += diff * diff;
+            }
+
+            var result: T = @reduce(.Add, sum);
+
+            // Handle remaining elements
+            while (i < len) : (i += 1) {
+                const diff = a[i] - b[i];
+                result += diff * diff;
+            }
+
+            return result;
+        }
+        fn canUseSIMD(comptime ValType: type) bool {
+            if (!std.Target.x86.featureSetHas(builtin.cpu.features, .sse)) {
+                return false;
+            }
+            return switch (ValType) {
+                f32 => true,
+                f64 => std.Target.x86.featureSetHas(builtin.cpu.features, .sse2),
+                else => false,
+            };
+        }
+
+        const SIMD_WIDTH = switch (T) {
+            f32 => if (std.Target.x86.featureSetHas(builtin.cpu.features, .avx)) 8 else 4,
+            f64 => if (std.Target.x86.featureSetHas(builtin.cpu.features, .avx)) 4 else 2,
+            else => 1,
+        };
 
         pub fn search(self: *Self, query: []const T, k: usize) ![]const Node {
             self.mutex.lock();
