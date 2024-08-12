@@ -9,13 +9,17 @@ pub fn runMultiThreadedBenchmarks(allocator: std.mem.Allocator, config: shared.B
 
     for (config.dimensions) |dim| {
         for (thread_counts) |thread_count| {
+            // Build the index
+            var hnsw = try shared.buildIndex(allocator, dim, config.index_size);
+            defer hnsw.deinit();
+
             // Insertion benchmark
-            const insertion_result = try shared.runInsertionBenchmark(allocator, config.num_points, dim, thread_count);
+            const insertion_result = try shared.runInsertionBenchmark(allocator, &hnsw, dim, config.num_index_operations, thread_count);
             std.debug.print("{}\n", .{insertion_result});
 
             // Search benchmarks
             for (config.k_values) |k| {
-                const search_result = try shared.runSearchBenchmark(allocator, config.num_points, dim, config.num_queries, k, thread_count);
+                const search_result = try shared.runSearchBenchmark(allocator, &hnsw, dim, k, config.num_search_operations, thread_count);
                 std.debug.print("{}\n", .{search_result});
             }
 
@@ -30,10 +34,11 @@ pub fn main() !void {
     const allocator = gpa.allocator();
 
     const config = shared.BenchmarkConfig{
-        .num_points = 100000,
         .dimensions = &[_]usize{ 128, 512, 768, 1024 },
-        .num_queries = 10000,
         .k_values = &[_]usize{ 10, 25, 50, 100 },
+        .index_size = 100000,
+        .num_index_operations = 10000,
+        .num_search_operations = 20000,
     };
 
     try runMultiThreadedBenchmarks(allocator, config);
