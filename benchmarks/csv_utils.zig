@@ -26,7 +26,7 @@ pub fn appendToCsv(file_path: []const u8, data: []const u8) !void {
 }
 
 pub fn getCsvFilePath(allocator: std.mem.Allocator, git_commit: []const u8) ![]const u8 {
-    return try std.fmt.allocPrint(allocator, "benchmark_results_{s}.csv", .{git_commit});
+    return try std.fmt.allocPrint(allocator, "benchmarks/results/{s}.csv", .{git_commit});
 }
 
 pub fn ensureCsvHeaderExists(file_path: []const u8) !void {
