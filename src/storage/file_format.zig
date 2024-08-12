@@ -67,79 +67,87 @@ pub const FileFormat = struct {
         try writer.writeAll(self.index_data);
     }
 
-    pub fn read(self: *Self, reader: anytype) !void {
-        // Free previously allocated memory if any
-        self.deinit();
+    pub fn verifyFileFormat(file_path: []const u8) !void {
+        const file = try std.fs.cwd().openFile(file_path, .{});
+        defer file.close();
 
+        var buffer: [1024]u8 = undefined;
+        const bytes_read = try file.readAll(&buffer);
+
+        std.debug.print("File format verification:\n", .{});
+        std.debug.print("Total bytes read: {}\n", .{bytes_read});
+
+        if (bytes_read < 16) {
+            return error.InvalidFileFormat;
+        }
+
+        // Verify magic number
+        if (!std.mem.eql(u8, buffer[0..4], "ZVDB")) {
+            return error.InvalidMagicNumber;
+        }
+        std.debug.print("Magic number: OK\n", .{});
+
+        // Verify version
+        const version = std.mem.readIntLittle(u32, buffer[4..8]);
+        std.debug.print("Version: {}\n", .{version});
+
+        // Verify dimension
+        const dimension = std.mem.readIntLittle(u32, buffer[8..12]);
+        std.debug.print("Dimension: {}\n", .{dimension});
+
+        // Verify distance function and index type
+        std.debug.print("Distance function: {}\n", .{buffer[12]});
+        std.debug.print("Index type: {}\n", .{buffer[13]});
+
+        // Print the rest of the buffer for inspection
+        std.debug.print("File content preview:\n", .{});
+        var i: usize = 0;
+        while (i < bytes_read) : (i += 1) {
+            if (i % 16 == 0) {
+                std.debug.print("\n{X:0>4}: ", .{i});
+            }
+            std.debug.print("{X:0>2} ", .{buffer[i]});
+        }
+        std.debug.print("\n", .{});
+    }
+
+    pub fn readHeader(self: *Self, reader: anytype) !void {
         self.header.magic_number = try reader.readBytesNoEof(4);
         self.header.version = try reader.readInt(u32, .little);
         self.header.dimension = try reader.readInt(u32, .little);
         self.header.distance_function = try reader.readByte();
         self.header.index_type = try reader.readByte();
+        std.debug.print("Header read: {any}\n", .{self.header});
+    }
 
+    pub fn readVectorData(self: *Self, reader: anytype) !void {
         self.vector_count = try reader.readInt(u64, .little);
         const vector_data_size = self.vector_count * self.header.dimension * @sizeOf(f32);
         self.vector_data = try self.allocator.alloc(u8, vector_data_size);
-        errdefer self.allocator.free(self.vector_data);
         const bytes_read = try reader.readAll(self.vector_data);
         if (bytes_read != vector_data_size) {
-            return error.IncompleteRead;
+            return error.IncompleteVectorData;
         }
+        std.debug.print("Vector data read: count={}, size={} bytes\n", .{self.vector_count, vector_data_size});
+    }
 
-        const metadata_size = reader.readInt(u64, .little) catch |err| {
-            std.debug.print("Error reading metadata size: {}\n", .{err});
-            return err;
-        };
-        std.debug.print("Read metadata size: {} bytes\n", .{metadata_size});
-
-        // Check if metadata_size is reasonable
-        if (metadata_size > 10_000_000_000) { // 10 GB limit
-            std.debug.print("Metadata size exceeds limit of 10 GB. Read size: {} bytes\n", .{metadata_size});
+    pub fn readMetadata(self: *Self, reader: anytype) !void {
+        const metadata_size = try reader.readInt(u32, .little);
+        std.debug.print("Metadata size read: {} bytes\n", .{metadata_size});
+        if (metadata_size > 10_000_000) { // 10 MB limit
             return error.MetadataTooLarge;
         }
-        if (metadata_size == 0) {
-            std.debug.print("Warning: Metadata size is 0\n", .{});
-            self.metadata = &[_]u8{};
-        } else {
-            // Check if metadata_size is within the remaining file size
-            const current_position = try reader.context.getPos();
-            const remaining_size = try reader.context.getEndPos() - current_position;
-            if (metadata_size > remaining_size) {
-                std.debug.print("Metadata size ({} bytes) exceeds remaining file size ({} bytes)\n", .{metadata_size, remaining_size});
-                return error.InvalidMetadataSize;
-            }
-
-            self.metadata = self.allocator.alloc(u8, metadata_size) catch |err| {
-                std.debug.print("Failed to allocate memory for metadata. Size: {} bytes, Error: {}\n", .{metadata_size, err});
-                return error.MetadataAllocationFailed;
-            };
+        self.metadata = try self.allocator.alloc(u8, metadata_size);
+        const bytes_read = try reader.readAll(self.metadata);
+        if (bytes_read != metadata_size) {
+            return error.IncompleteMetadata;
         }
-        std.debug.print("Allocated memory for metadata: {} bytes\n", .{self.metadata.len});
-        errdefer self.allocator.free(self.metadata);
+        std.debug.print("Metadata read: {} bytes\n", .{bytes_read});
+    }
 
-        if (metadata_size > 0) {
-            const metadata_bytes_read = try reader.readAll(self.metadata);
-            if (metadata_bytes_read != metadata_size) {
-                std.debug.print("Incomplete metadata read. Expected {} bytes, got {} bytes\n", .{metadata_size, metadata_bytes_read});
-                return error.IncompleteRead;
-            }
-        }
-
-        const index_data_size = try reader.readInt(u64, .little);
-        self.index_data = try self.allocator.alloc(u8, index_data_size);
-        errdefer self.allocator.free(self.index_data);
-        const index_bytes_read = try reader.readAll(self.index_data);
-        if (index_bytes_read != index_data_size) {
-            return error.IncompleteRead;
-        }
-
-        self.has_allocated = true;
-
-        std.debug.print("Read file format: vector_count={}, vector_data={} bytes, metadata={} bytes, index_data={} bytes\n", .{
-            self.vector_count,
-            self.vector_data.len,
-            self.metadata.len,
-            self.index_data.len,
-        });
+    pub fn read(self: *Self, reader: anytype) !void {
+        try self.readHeader(reader);
+        try self.readVectorData(reader);
+        try self.readMetadata(reader);
     }
 };

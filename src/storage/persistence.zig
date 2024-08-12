@@ -52,9 +52,7 @@ pub const Persistence = struct {
         std.debug.print("  Vector data size: {} bytes\n", .{self.file_format.vector_data.len});
         std.debug.print("  Metadata size: {} bytes\n", .{self.file_format.metadata.len});
         std.debug.print("  Index data size: {} bytes\n", .{self.file_format.index_data.len});
-        std.debug.print("File header prepared: magic={s}, version={}, dimension={}, distance_function={}, index_type={}\n",
-            .{self.file_format.header.magic_number, self.file_format.header.version, self.file_format.header.dimension,
-             self.file_format.header.distance_function, self.file_format.header.index_type});
+        std.debug.print("File header prepared: magic={s}, version={}, dimension={}, distance_function={}, index_type={}\n", .{ self.file_format.header.magic_number, self.file_format.header.version, self.file_format.header.dimension, self.file_format.header.distance_function, self.file_format.header.index_type });
 
         // Serialize index data
         var index_data = std.ArrayList(u8).init(self.allocator);
@@ -74,11 +72,9 @@ pub const Persistence = struct {
         try self.file_format.write(writer);
 
         std.debug.print("File written successfully\n", .{});
-        std.debug.print("Total size of serialized data: {} bytes\n", .{
-            self.file_format.vector_data.len +
+        std.debug.print("Total size of serialized data: {} bytes\n", .{self.file_format.vector_data.len +
             self.file_format.metadata.len +
-            self.file_format.index_data.len
-        });
+            self.file_format.index_data.len});
     }
 
     pub fn load(self: *Self, zvdb: *ZVDB, file_path: []const u8) !void {
@@ -109,7 +105,7 @@ pub const Persistence = struct {
             std.debug.print("Error reading file format: {}\n", .{err});
             switch (err) {
                 error.MetadataTooLarge => std.debug.print("Metadata size exceeds the limit. Please check the file integrity.\n", .{}),
-                error.MetadataAllocationFailed => std.debug.print("Failed to allocate memory for metadata. This might be due to insufficient memory or an incorrect metadata size in the file.\n", .{}),
+                error.OutOfMemory => std.debug.print("Failed to allocate memory for metadata. This might be due to insufficient memory or an incorrect metadata size in the file.\n", .{}),
                 error.EndOfStream => std.debug.print("Unexpected end of file while reading. The file might be truncated.\n", .{}),
                 error.InputOutput => std.debug.print("I/O error occurred while reading the file.\n", .{}),
                 error.IncompleteRead => std.debug.print("Incomplete read of metadata. The file might be corrupted or truncated.\n", .{}),
@@ -117,15 +113,14 @@ pub const Persistence = struct {
             }
             return err;
         };
+
         std.debug.print("File format read successfully\n", .{});
         self.validateFileHeader() catch |err| {
             std.debug.print("Error validating file header: {}\n", .{err});
             return err;
         };
 
-        std.debug.print("File header read: magic={s}, version={}, dimension={}, distance_function={}, index_type={}\n",
-            .{self.file_format.header.magic_number, self.file_format.header.version, self.file_format.header.dimension,
-             self.file_format.header.distance_function, self.file_format.header.index_type});
+        std.debug.print("File header read: magic={s}, version={}, dimension={}, distance_function={}, index_type={}\n", .{ self.file_format.header.magic_number, self.file_format.header.version, self.file_format.header.dimension, self.file_format.header.distance_function, self.file_format.header.index_type });
 
         // Update ZVDB configuration
         zvdb.config.dimension = self.file_format.header.dimension;

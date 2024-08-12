@@ -136,20 +136,28 @@ pub const MemoryStorage = struct {
             const md = entry.value_ptr.*;
 
             try serialized_data.writer().writeInt(u64, id, .little);
-            
+
             // Serialize only the serializable fields of MetadataSchema
             const serializable_md = .{
                 .name = md.name,
                 .value = md.value,
                 .tags = md.tags.items,
             };
-            
+
             const md_json = try std.json.stringifyAlloc(allocator, serializable_md, .{});
             defer allocator.free(md_json);
+
+            std.debug.print("Serializing metadata for ID {}: size = {} bytes\n", .{id, md_json.len});
+
+            if (md_json.len > std.math.maxInt(u32)) {
+                return error.MetadataTooLarge;
+            }
+
             try serialized_data.writer().writeInt(u32, @intCast(md_json.len), .little);
             try serialized_data.writer().writeAll(md_json);
         }
 
+        std.debug.print("Total serialized metadata size: {} bytes\n", .{serialized_data.items.len});
         return serialized_data.toOwnedSlice();
     }
 
@@ -182,12 +190,12 @@ pub const MemoryStorage = struct {
             const id = try reader.readInt(u64, .little);
             const md_len = try reader.readInt(u32, .little);
 
-            var md_buffer = try allocator.alloc(u8, md_len);
+            const md_buffer = try allocator.alloc(u8, md_len);
             defer allocator.free(md_buffer);
 
             _ = try reader.readAll(md_buffer);
 
-            var md = try metadata.MetadataSchema.init(allocator);
+            var md = metadata.MetadataSchema.init(allocator);
             errdefer md.deinit();
 
             const parsed = try std.json.parseFromSlice(std.json.Value, allocator, md_buffer, .{});
