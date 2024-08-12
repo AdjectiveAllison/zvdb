@@ -44,7 +44,7 @@ pub fn main() !void {
     const config = shared.BenchmarkConfig{
         .dimensions = &[_]usize{ 128, 512, 768, 1024 },
         .k_values = &[_]usize{ 10, 25, 50 },
-        .index_size = 10000,
+        .index_size = 100000,
         .num_index_operations = 10000,
         .num_search_operations = 3000,
     };
