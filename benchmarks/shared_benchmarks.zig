@@ -1,5 +1,6 @@
 const std = @import("std");
 const HNSW = @import("zvdb").HNSW;
+const csv_utils = @import("csv_utils.zig");
 
 pub const BenchmarkResult = struct {
     operation: []const u8,
@@ -32,8 +33,8 @@ pub const BenchmarkResult = struct {
         try writer.print("  {s} per second: {d:.2}\n", .{ self.operation, self.operations_per_second });
     }
 
-    pub fn toCsv(self: BenchmarkResult) []const u8 {
-        return std.fmt.allocPrint(std.heap.page_allocator, "{s},{d},{d},{d},{d},{d},{d:.2}", .{
+    pub fn toCsv(self: BenchmarkResult, allocator: std.mem.Allocator) ![]const u8 {
+        return try std.fmt.allocPrint(allocator, "{s},{d},{d},{d},{d},{d},{d:.2}", .{
             self.operation,
             self.dimensions,
             self.k orelse 0,
@@ -41,7 +42,7 @@ pub const BenchmarkResult = struct {
             self.total_time_ns,
             self.operations_performed,
             self.operations_per_second,
-        }) catch unreachable;
+        });
     }
 };
 
@@ -131,3 +132,12 @@ pub const BenchmarkConfig = struct {
     num_index_operations: usize,
     num_search_operations: usize,
 };
+
+pub fn appendResultToCsv(allocator: std.mem.Allocator, result: BenchmarkResult, file_path: []const u8) !void {
+    try csv_utils.ensureCsvHeaderExists(file_path);
+
+    const csv_line = try result.toCsv(allocator);
+    defer allocator.free(csv_line);
+
+    try csv_utils.appendToCsv(file_path, csv_line);
+}
