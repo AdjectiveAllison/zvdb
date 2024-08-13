@@ -5,7 +5,8 @@ const Allocator = std.mem.Allocator;
 const ArrayList = std.ArrayList;
 const AutoHashMap = std.AutoHashMap;
 const Order = std.math.Order;
-const Mutex = std.Thread.Mutex;
+const RwLock = std.Thread.RwLock;
+const AtomicValue = std.atomic.Value;
 
 pub const HNSWConfig = struct {
     m: usize,
@@ -21,7 +22,7 @@ pub fn HNSW(comptime T: type) type {
             id: usize,
             point: []T,
             connections: []ArrayList(usize),
-            mutex: Mutex,
+            lock: RwLock,
 
             fn init(allocator: Allocator, id: usize, point: []const T, level: usize) !Node {
                 const connections = try allocator.alloc(ArrayList(usize), level + 1);
@@ -36,7 +37,7 @@ pub fn HNSW(comptime T: type) type {
                     .id = id,
                     .point = owned_point,
                     .connections = connections,
-                    .mutex = Mutex{},
+                    .lock = RwLock{},
                 };
             }
 
@@ -51,20 +52,20 @@ pub fn HNSW(comptime T: type) type {
 
         allocator: Allocator,
         nodes: AutoHashMap(usize, Node),
-        entry_point: ?usize,
-        max_level: usize,
+        entry_point: AtomicValue(usize),
+        max_level: AtomicValue(usize),
         config: HNSWConfig,
-        mutex: Mutex,
+        global_lock: RwLock,
 
         pub fn init(allocator: Allocator, config: HNSWConfig) !Self {
             try distance.validateMetricForType(config.distance, T);
             return .{
                 .allocator = allocator,
                 .nodes = AutoHashMap(usize, Node).init(allocator),
-                .entry_point = null,
-                .max_level = 0,
+                .entry_point = AtomicValue(usize).init(std.math.maxInt(usize)),
+                .max_level = AtomicValue(usize).init(0),
                 .config = config,
-                .mutex = Mutex{},
+                .global_lock = RwLock{},
             };
         }
 
@@ -89,8 +90,8 @@ pub fn HNSW(comptime T: type) type {
         }
 
         pub fn insert(self: *Self, point: []const T) !void {
-            self.mutex.lock();
-            defer self.mutex.unlock();
+            self.global_lock.lock();
+            defer self.global_lock.unlock();
 
             const id = self.nodes.count();
             const level = self.randomLevel();
@@ -99,19 +100,26 @@ pub fn HNSW(comptime T: type) type {
 
             try self.nodes.put(id, node);
 
-            if (self.entry_point) |entry| {
+            const entry = self.entry_point.load(.acquire);
+            if (entry != std.math.maxInt(usize)) {
                 var ep_copy = entry;
                 var curr_dist = self.calculateDistance(node.point, self.nodes.get(ep_copy).?.point);
 
-                for (0..self.max_level + 1) |layer| {
+                const max_level = self.max_level.load(.acquire);
+                for (0..max_level + 1) |layer| {
                     var changed = true;
                     while (changed) {
                         changed = false;
-                        const curr_node = self.nodes.get(ep_copy).?;
+                        var curr_node = self.nodes.get(ep_copy).?;
+                        curr_node.lock.lockShared();
+                        defer curr_node.lock.unlockShared();
+
                         if (layer < curr_node.connections.len) {
                             for (curr_node.connections[layer].items) |neighbor_id| {
-                                const neighbor = self.nodes.get(neighbor_id).?;
+                                var neighbor = self.nodes.get(neighbor_id).?;
+                                neighbor.lock.lockShared();
                                 const dist = self.calculateDistance(node.point, neighbor.point);
+                                neighbor.lock.unlockShared();
                                 if (dist < curr_dist) {
                                     ep_copy = neighbor_id;
                                     curr_dist = dist;
@@ -126,11 +134,13 @@ pub fn HNSW(comptime T: type) type {
                     }
                 }
             } else {
-                self.entry_point = id;
+                self.entry_point.store(id, .release);
             }
 
-            if (level > self.max_level) {
-                self.max_level = level;
+            while (true) {
+                const old_max_level = self.max_level.load(.acquire);
+                if (level <= old_max_level) break;
+                if (self.max_level.cmpxchgStrong(old_max_level, level, .release, .monotonic) == null) break;
             }
         }
 
@@ -138,10 +148,10 @@ pub fn HNSW(comptime T: type) type {
             var source_node = self.nodes.getPtr(source) orelse return error.NodeNotFound;
             var target_node = self.nodes.getPtr(target) orelse return error.NodeNotFound;
 
-            source_node.mutex.lock();
-            defer source_node.mutex.unlock();
-            target_node.mutex.lock();
-            defer target_node.mutex.unlock();
+            source_node.lock.lock();
+            defer source_node.lock.unlock();
+            target_node.lock.lock();
+            defer target_node.lock.unlock();
 
             if (level < source_node.connections.len) {
                 try source_node.connections[level].append(target);
@@ -198,13 +208,14 @@ pub fn HNSW(comptime T: type) type {
         }
 
         pub fn search(self: *Self, query: []const T, k: usize) ![]const Node {
-            self.mutex.lock();
-            defer self.mutex.unlock();
+            self.global_lock.lockShared();
+            defer self.global_lock.unlockShared();
 
             var result = try ArrayList(Node).initCapacity(self.allocator, k);
             errdefer result.deinit();
 
-            if (self.entry_point) |entry| {
+            const entry = self.entry_point.load(.acquire);
+            if (entry != std.math.maxInt(usize)) {
                 var candidates = std.PriorityQueue(CandidateNode, void, CandidateNode.lessThan).init(self.allocator, {});
                 defer candidates.deinit();
 
@@ -216,13 +227,17 @@ pub fn HNSW(comptime T: type) type {
 
                 while (candidates.count() > 0 and result.items.len < k) {
                     const current = candidates.remove();
-                    const current_node = self.nodes.get(current.id).?;
+                    var current_node = self.nodes.get(current.id).?;
+                    current_node.lock.lockShared();
                     try result.append(current_node);
+                    current_node.lock.unlockShared();
 
                     for (current_node.connections[0].items) |neighbor_id| {
                         if (!visited.contains(neighbor_id)) {
-                            const neighbor = self.nodes.get(neighbor_id).?;
+                            var neighbor = self.nodes.get(neighbor_id).?;
+                            neighbor.lock.lockShared();
                             const dist = self.calculateDistance(query, neighbor.point);
+                            neighbor.lock.unlockShared();
                             try candidates.add(.{ .id = neighbor_id, .distance = dist });
                             try visited.put(neighbor_id, {});
                         }
