@@ -18,11 +18,6 @@ pub const HNSWConfig = struct {
 };
 
 pub fn HNSW(comptime T: type, comptime distance_metric: DistanceMetric) type {
-    const distance = switch (distance_metric) {
-        .Euclidean => euclideanDistance,
-        .Manhattan => manhattanDistance,
-        .Cosine => if (@typeInfo(T) == .Float) cosineDistance else @compileError("Cosine distance is only supported for floating-point types"),
-    };
     return struct {
         const Self = @This();
 
@@ -98,7 +93,7 @@ pub fn HNSW(comptime T: type, comptime distance_metric: DistanceMetric) type {
 
             if (self.entry_point) |entry| {
                 var ep_copy = entry;
-                var curr_dist = distance(node.point, self.nodes.get(ep_copy).?.point);
+                var curr_dist = self.distance(node.point, self.nodes.get(ep_copy).?.point);
 
                 for (0..self.max_level + 1) |layer| {
                     var changed = true;
@@ -108,7 +103,7 @@ pub fn HNSW(comptime T: type, comptime distance_metric: DistanceMetric) type {
                         if (layer < curr_node.connections.len) {
                             for (curr_node.connections[layer].items) |neighbor_id| {
                                 const neighbor = self.nodes.get(neighbor_id).?;
-                                const dist = distance(node.point, neighbor.point);
+                                const dist = self.distance(node.point, neighbor.point);
                                 if (dist < curr_dist) {
                                     ep_copy = neighbor_id;
                                     curr_dist = dist;
@@ -172,8 +167,8 @@ pub fn HNSW(comptime T: type, comptime distance_metric: DistanceMetric) type {
 
             const compareFn = struct {
                 fn compare(ctx: Context, a: usize, b: usize) bool {
-                    const dist_a = distance(ctx.node.point, ctx.self.nodes.get(a).?.point);
-                    const dist_b = distance(ctx.node.point, ctx.self.nodes.get(b).?.point);
+                    const dist_a = ctx.self.distance(ctx.node.point, ctx.self.nodes.get(a).?.point);
+                    const dist_b = ctx.self.distance(ctx.node.point, ctx.self.nodes.get(b).?.point);
                     return dist_a < dist_b;
                 }
             }.compare;
@@ -192,6 +187,15 @@ pub fn HNSW(comptime T: type, comptime distance_metric: DistanceMetric) type {
                 level += 1;
             }
             return level;
+        }
+
+        fn distance(self: *const Self, a: []const T, b: []const T) T {
+            _ = self;
+            return switch (distance_metric) {
+                .Euclidean => euclideanDistance(a, b),
+                .Manhattan => manhattanDistance(a, b),
+                .Cosine => if (@typeInfo(T) == .Float) cosineDistance(a, b) else @compileError("Cosine distance is only supported for floating-point types"),
+            };
         }
 
         // Hooray, distance!!!
@@ -434,7 +438,7 @@ pub fn HNSW(comptime T: type, comptime distance_metric: DistanceMetric) type {
                 var visited = std.AutoHashMap(usize, void).init(self.allocator);
                 defer visited.deinit();
 
-                try candidates.add(.{ .id = entry, .distance = distance(query, self.nodes.get(entry).?.point) });
+                try candidates.add(.{ .id = entry, .distance = self.distance(query, self.nodes.get(entry).?.point) });
                 try visited.put(entry, {});
 
                 while (candidates.count() > 0 and result.items.len < k) {
@@ -445,7 +449,7 @@ pub fn HNSW(comptime T: type, comptime distance_metric: DistanceMetric) type {
                     for (current_node.connections[0].items) |neighbor_id| {
                         if (!visited.contains(neighbor_id)) {
                             const neighbor = self.nodes.get(neighbor_id).?;
-                            const dist = distance(query, neighbor.point);
+                            const dist = self.distance(query, neighbor.point);
                             try candidates.add(.{ .id = neighbor_id, .distance = dist });
                             try visited.put(neighbor_id, {});
                         }
