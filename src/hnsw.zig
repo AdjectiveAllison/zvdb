@@ -6,6 +6,18 @@ const AutoHashMap = std.AutoHashMap;
 const Order = std.math.Order;
 const Mutex = std.Thread.Mutex;
 
+pub const DistanceMetric = enum {
+    Euclidean,
+    Manhattan,
+    Cosine,
+};
+
+pub const HNSWConfig = struct {
+    m: usize,
+    ef_construction: usize,
+    distance_metric: DistanceMetric = .Euclidean,
+};
+
 pub fn HNSW(comptime T: type) type {
     return struct {
         const Self = @This();
@@ -46,18 +58,16 @@ pub fn HNSW(comptime T: type) type {
         nodes: AutoHashMap(usize, Node),
         entry_point: ?usize,
         max_level: usize,
-        m: usize,
-        ef_construction: usize,
+        config: HNSWConfig,
         mutex: Mutex,
 
-        pub fn init(allocator: Allocator, m: usize, ef_construction: usize) Self {
+        pub fn init(allocator: Allocator, config: HNSWConfig) Self {
             return .{
                 .allocator = allocator,
                 .nodes = AutoHashMap(usize, Node).init(allocator),
                 .entry_point = null,
                 .max_level = 0,
-                .m = m,
-                .ef_construction = ef_construction,
+                .config = config,
                 .mutex = Mutex{},
             };
         }
@@ -84,7 +94,7 @@ pub fn HNSW(comptime T: type) type {
 
             if (self.entry_point) |entry| {
                 var ep_copy = entry;
-                var curr_dist = distance(node.point, self.nodes.get(ep_copy).?.point);
+                var curr_dist = distance(self.distance_metric, self.distance_metric, node.point, self.nodes.get(ep_copy).?.point);
 
                 for (0..self.max_level + 1) |layer| {
                     var changed = true;
@@ -94,7 +104,7 @@ pub fn HNSW(comptime T: type) type {
                         if (layer < curr_node.connections.len) {
                             for (curr_node.connections[layer].items) |neighbor_id| {
                                 const neighbor = self.nodes.get(neighbor_id).?;
-                                const dist = distance(node.point, neighbor.point);
+                                const dist = distance(self.distance_metric, node.point, neighbor.point);
                                 if (dist < curr_dist) {
                                     ep_copy = neighbor_id;
                                     curr_dist = dist;
@@ -158,8 +168,8 @@ pub fn HNSW(comptime T: type) type {
 
             const compareFn = struct {
                 fn compare(ctx: Context, a: usize, b: usize) bool {
-                    const dist_a = distance(ctx.node.point, ctx.self.nodes.get(a).?.point);
-                    const dist_b = distance(ctx.node.point, ctx.self.nodes.get(b).?.point);
+                    const dist_a = distance(self.distance_metric, ctx.node.point, ctx.self.nodes.get(a).?.point);
+                    const dist_b = distance(self.distance_metric, ctx.node.point, ctx.self.nodes.get(b).?.point);
                     return dist_a < dist_b;
                 }
             }.compare;
@@ -180,14 +190,42 @@ pub fn HNSW(comptime T: type) type {
             return level;
         }
 
-        fn distance(a: []const T, b: []const T) T {
+        pub fn distance(self: *const Self, a: []const T, b: []const T) T {
             if (a.len != b.len) {
                 @panic("Mismatched dimensions in distance calculation");
             }
-            return if (comptime canUseSIMD(T)) simdDistance(a, b) else scalarDistance(a, b);
+            return switch (self.config.distance_metric) {
+                .Euclidean => euclideanDistance(a, b),
+                .Manhattan => manhattanDistance(a, b),
+                .Cosine => cosineDistance(a, b),
+            };
         }
 
-        fn scalarDistance(a: []const T, b: []const T) T {
+        fn euclideanDistance(a: []const T, b: []const T) T {
+            const squared = if (comptime canUseSIMD(T))
+                simdSquaredDistance(a, b)
+            else
+                scalarSquaredDistance(a, b);
+            return std.math.sqrt(squared);
+        }
+
+        fn manhattanDistance(a: []const T, b: []const T) T {
+            if (comptime canUseSIMD(T)) {
+                return simdManhattanDistance(a, b);
+            } else {
+                return scalarManhattanDistance(a, b);
+            }
+        }
+
+        fn cosineDistance(a: []const T, b: []const T) T {
+            if (comptime canUseSIMD(T)) {
+                return simdCosineDistance(a, b);
+            } else {
+                return scalarCosineDistance(a, b);
+            }
+        }
+
+        fn scalarSquaredDistance(a: []const T, b: []const T) T {
             var sum: T = 0;
             for (a, 0..) |_, i| {
                 const diff = a[i] - b[i];
@@ -196,7 +234,28 @@ pub fn HNSW(comptime T: type) type {
             return sum;
         }
 
-        fn simdDistance(a: []const T, b: []const T) T {
+        fn scalarManhattanDistance(a: []const T, b: []const T) T {
+            var sum: T = 0;
+            for (a, 0..) |_, i| {
+                sum += @abs(a[i] - b[i]);
+            }
+            return sum;
+        }
+
+        fn scalarCosineDistance(a: []const T, b: []const T) T {
+            var dot_product: T = 0;
+            var magnitude_a: T = 0;
+            var magnitude_b: T = 0;
+            for (a, 0..) |_, i| {
+                dot_product += a[i] * b[i];
+                magnitude_a += a[i] * a[i];
+                magnitude_b += b[i] * b[i];
+            }
+            const cosine_similarity = dot_product / (std.math.sqrt(magnitude_a) * std.math.sqrt(magnitude_b));
+            return 1 - cosine_similarity;
+        }
+
+        fn simdSquaredDistance(a: []const T, b: []const T) T {
             const len = a.len;
             const SimdVec = @Vector(SIMD_WIDTH, T);
             var sum: SimdVec = @splat(0);
@@ -218,6 +277,59 @@ pub fn HNSW(comptime T: type) type {
             }
 
             return result;
+        }
+
+        fn simdManhattanDistance(a: []const T, b: []const T) T {
+            const len = a.len;
+            const SimdVec = @Vector(SIMD_WIDTH, T);
+            var sum: SimdVec = @splat(0);
+
+            var i: usize = 0;
+            while (i + SIMD_WIDTH <= len) : (i += SIMD_WIDTH) {
+                const va = @as(SimdVec, a[i..][0..SIMD_WIDTH].*);
+                const vb = @as(SimdVec, b[i..][0..SIMD_WIDTH].*);
+                sum += @abs(va - vb);
+            }
+
+            var result: T = @reduce(.Add, sum);
+
+            // Handle remaining elements
+            while (i < len) : (i += 1) {
+                result += @abs(a[i] - b[i]);
+            }
+
+            return result;
+        }
+
+        fn simdCosineDistance(a: []const T, b: []const T) T {
+            const len = a.len;
+            const SimdVec = @Vector(SIMD_WIDTH, T);
+            var dot_product: SimdVec = @splat(0);
+            var magnitude_a: SimdVec = @splat(0);
+            var magnitude_b: SimdVec = @splat(0);
+
+            var i: usize = 0;
+            while (i + SIMD_WIDTH <= len) : (i += SIMD_WIDTH) {
+                const va = @as(SimdVec, a[i..][0..SIMD_WIDTH].*);
+                const vb = @as(SimdVec, b[i..][0..SIMD_WIDTH].*);
+                dot_product += va * vb;
+                magnitude_a += va * va;
+                magnitude_b += vb * vb;
+            }
+
+            var dot_product_sum: T = @reduce(.Add, dot_product);
+            var magnitude_a_sum: T = @reduce(.Add, magnitude_a);
+            var magnitude_b_sum: T = @reduce(.Add, magnitude_b);
+
+            // Handle remaining elements
+            while (i < len) : (i += 1) {
+                dot_product_sum += a[i] * b[i];
+                magnitude_a_sum += a[i] * a[i];
+                magnitude_b_sum += b[i] * b[i];
+            }
+
+            const cosine_similarity = dot_product_sum / (std.math.sqrt(magnitude_a_sum) * std.math.sqrt(magnitude_b_sum));
+            return 1 - cosine_similarity;
         }
         fn canUseSIMD(comptime ValType: type) bool {
             if (!std.Target.x86.featureSetHas(builtin.cpu.features, .sse)) {
@@ -250,7 +362,7 @@ pub fn HNSW(comptime T: type) type {
                 var visited = std.AutoHashMap(usize, void).init(self.allocator);
                 defer visited.deinit();
 
-                try candidates.add(.{ .id = entry, .distance = distance(query, self.nodes.get(entry).?.point) });
+                try candidates.add(.{ .id = entry, .distance = distance(self.distance_metric, query, self.nodes.get(entry).?.point) });
                 try visited.put(entry, {});
 
                 while (candidates.count() > 0 and result.items.len < k) {
@@ -261,7 +373,7 @@ pub fn HNSW(comptime T: type) type {
                     for (current_node.connections[0].items) |neighbor_id| {
                         if (!visited.contains(neighbor_id)) {
                             const neighbor = self.nodes.get(neighbor_id).?;
-                            const dist = distance(query, neighbor.point);
+                            const dist = distance(self.distance_metric, query, neighbor.point);
                             try candidates.add(.{ .id = neighbor_id, .distance = dist });
                             try visited.put(neighbor_id, {});
                         }
@@ -272,7 +384,7 @@ pub fn HNSW(comptime T: type) type {
             const Context = struct {
                 query: []const T,
                 pub fn lessThan(ctx: @This(), a: Node, b: Node) bool {
-                    return distance(ctx.query, a.point) < distance(ctx.query, b.point);
+                    return distance(self.distance_metric, ctx.query, a.point) < distance(self.distance_metric, ctx.query, b.point);
                 }
             };
             std.sort.insertion(Node, result.items, Context{ .query = query }, Context.lessThan);
