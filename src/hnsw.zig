@@ -15,10 +15,9 @@ pub const DistanceMetric = enum {
 pub const HNSWConfig = struct {
     m: usize,
     ef_construction: usize,
-    distance_metric: DistanceMetric = .Euclidean,
 };
 
-pub fn HNSW(comptime T: type) type {
+pub fn HNSW(comptime T: type, comptime distance_metric: DistanceMetric) type {
     return struct {
         const Self = @This();
 
@@ -190,72 +189,55 @@ pub fn HNSW(comptime T: type) type {
             return level;
         }
 
+        // Hooray, distance!!!
         pub fn distance(self: *const Self, a: []const T, b: []const T) T {
             if (a.len != b.len) {
                 @panic("Mismatched dimensions in distance calculation");
             }
             return switch (self.config.distance_metric) {
-                .Euclidean => self.euclideanDistance(a, b),
-                .Manhattan => self.manhattanDistance(a, b),
-                .Cosine => self.cosineDistance(a, b),
+                .Euclidean => euclideanDistance(a, b),
+                .Manhattan => manhattanDistance(a, b),
+                .Cosine => if (@typeInfo(T) == .Float) cosineDistance(a, b) else @compileError("Cosine distance is only supported for floating-point types"),
             };
         }
 
-        fn euclideanDistance(self: *const Self, a: []const T, b: []const T) T {
-            const squared = if (comptime self.canUseSIMD(T))
-                self.simdSquaredDistance(a, b)
+        // Euclidian here we come.
+
+        fn euclideanDistance(a: []const T, b: []const T) T {
+            const sum_of_squares = if (comptime canUseSIMD(T))
+                simdSumOfSquaredDifferences(a, b)
             else
-                self.scalarSquaredDistance(a, b);
-            return std.math.sqrt(squared);
+                scalarSumOfSquaredDifferences(a, b);
+
+            return switch (@typeInfo(T)) {
+                .Float => @sqrt(sum_of_squares),
+                .Int => {
+                    const IntType = @Type(.{ .Int = .{
+                        .signedness = .unsigned,
+                        .bits = @max(@bitSizeOf(T) * 2, 32),
+                    } });
+                    const large_sum = @as(IntType, @intCast(sum_of_squares));
+                    const float_result = @sqrt(@as(f64, @floatFromInt(large_sum)));
+                    return @as(T, @intFromFloat(@floor(float_result)));
+                },
+                else => @compileError("Unsupported type for Euclidean distance"),
+            };
         }
 
-        fn manhattanDistance(self: *const Self, a: []const T, b: []const T) T {
-            if (comptime self.canUseSIMD(T)) {
-                return self.simdManhattanDistance(a, b);
-            } else {
-                return self.scalarManhattanDistance(a, b);
-            }
-        }
-
-        fn cosineDistance(self: *const Self, a: []const T, b: []const T) T {
-            if (comptime self.canUseSIMD(T)) {
-                return self.simdCosineDistance(a, b);
-            } else {
-                return self.scalarCosineDistance(a, b);
-            }
-        }
-
-        fn scalarSquaredDistance(a: []const T, b: []const T) T {
+        fn scalarSumOfSquaredDifferences(a: []const T, b: []const T) T {
             var sum: T = 0;
-            for (a, 0..) |_, i| {
-                const diff = a[i] - b[i];
+            for (a, b) |ai, bi| {
+                const diff = switch (@typeInfo(T)) {
+                    .Float => ai - bi,
+                    .Int => if (ai > bi) ai - bi else bi - ai,
+                    else => unreachable,
+                };
                 sum += diff * diff;
             }
             return sum;
         }
 
-        fn scalarManhattanDistance(a: []const T, b: []const T) T {
-            var sum: T = 0;
-            for (a, 0..) |_, i| {
-                sum += @abs(a[i] - b[i]);
-            }
-            return sum;
-        }
-
-        fn scalarCosineDistance(a: []const T, b: []const T) T {
-            var dot_product: T = 0;
-            var magnitude_a: T = 0;
-            var magnitude_b: T = 0;
-            for (a, 0..) |_, i| {
-                dot_product += a[i] * b[i];
-                magnitude_a += a[i] * a[i];
-                magnitude_b += b[i] * b[i];
-            }
-            const cosine_similarity = dot_product / (std.math.sqrt(magnitude_a) * std.math.sqrt(magnitude_b));
-            return 1 - cosine_similarity;
-        }
-
-        fn simdSquaredDistance(a: []const T, b: []const T) T {
+        fn simdSumOfSquaredDifferences(a: []const T, b: []const T) T {
             const len = a.len;
             const SimdVec = @Vector(SIMD_WIDTH, T);
             var sum: SimdVec = @splat(0);
@@ -264,7 +246,11 @@ pub fn HNSW(comptime T: type) type {
             while (i + SIMD_WIDTH <= len) : (i += SIMD_WIDTH) {
                 const va = @as(SimdVec, a[i..][0..SIMD_WIDTH].*);
                 const vb = @as(SimdVec, b[i..][0..SIMD_WIDTH].*);
-                const diff = va - vb;
+                const diff = switch (@typeInfo(T)) {
+                    .Float => va - vb,
+                    .Int => @select(T, va >= vb, va - vb, vb - va),
+                    else => unreachable,
+                };
                 sum += diff * diff;
             }
 
@@ -272,11 +258,33 @@ pub fn HNSW(comptime T: type) type {
 
             // Handle remaining elements
             while (i < len) : (i += 1) {
-                const diff = a[i] - b[i];
+                const diff = switch (@typeInfo(T)) {
+                    .Float => a[i] - b[i],
+                    .Int => if (a[i] > b[i]) a[i] - b[i] else b[i] - a[i],
+                    else => unreachable,
+                };
                 result += diff * diff;
             }
 
             return result;
+        }
+
+        // WELCOME TO MANHATTAN!!!
+
+        fn manhattanDistance(a: []const T, b: []const T) T {
+            if (comptime canUseSIMD(T)) {
+                return simdManhattanDistance(a, b);
+            } else {
+                return scalarManhattanDistance(a, b);
+            }
+        }
+
+        fn scalarManhattanDistance(a: []const T, b: []const T) T {
+            var sum: T = 0;
+            for (a, 0..) |_, i| {
+                sum += if (a[i] > b[i]) a[i] - b[i] else b[i] - a[i];
+            }
+            return sum;
         }
 
         fn simdManhattanDistance(a: []const T, b: []const T) T {
@@ -288,17 +296,41 @@ pub fn HNSW(comptime T: type) type {
             while (i + SIMD_WIDTH <= len) : (i += SIMD_WIDTH) {
                 const va = @as(SimdVec, a[i..][0..SIMD_WIDTH].*);
                 const vb = @as(SimdVec, b[i..][0..SIMD_WIDTH].*);
-                sum += @abs(va - vb);
+                const diff = va - vb;
+                sum += @select(T, va > vb, diff, -diff);
             }
 
             var result: T = @reduce(.Add, sum);
 
             // Handle remaining elements
             while (i < len) : (i += 1) {
-                result += @abs(a[i] - b[i]);
+                result += if (a[i] > b[i]) a[i] - b[i] else b[i] - a[i];
             }
 
             return result;
+        }
+
+        // COSINE SECTION!!!!
+
+        fn cosineDistance(a: []const T, b: []const T) T {
+            if (comptime canUseSIMD(T)) {
+                return simdCosineDistance(a, b);
+            } else {
+                return scalarCosineDistance(a, b);
+            }
+        }
+
+        fn scalarCosineDistance(a: []const T, b: []const T) T {
+            var dot_product: T = 0;
+            var magnitude_a: T = 0;
+            var magnitude_b: T = 0;
+            for (a, b) |ai, bi| {
+                dot_product += ai * bi;
+                magnitude_a += ai * ai;
+                magnitude_b += bi * bi;
+            }
+
+            return finalizeDistance(dot_product, magnitude_a, magnitude_b);
         }
 
         fn simdCosineDistance(a: []const T, b: []const T) T {
@@ -317,37 +349,77 @@ pub fn HNSW(comptime T: type) type {
                 magnitude_b += vb * vb;
             }
 
-            var dot_product_sum: T = @reduce(.Add, dot_product);
-            var magnitude_a_sum: T = @reduce(.Add, magnitude_a);
-            var magnitude_b_sum: T = @reduce(.Add, magnitude_b);
+            // Reduce SIMD vectors and handle remaining elements
+            var dp_sum = @reduce(.Add, dot_product);
+            var ma_sum = @reduce(.Add, magnitude_a);
+            var mb_sum = @reduce(.Add, magnitude_b);
 
-            // Handle remaining elements
-            while (i < len) : (i += 1) {
-                dot_product_sum += a[i] * b[i];
-                magnitude_a_sum += a[i] * a[i];
-                magnitude_b_sum += b[i] * b[i];
+            for (i..len) |j| {
+                dp_sum += a[j] * b[j];
+                ma_sum += a[j] * a[j];
+                mb_sum += b[j] * b[j];
             }
 
-            const cosine_similarity = dot_product_sum / (std.math.sqrt(magnitude_a_sum) * std.math.sqrt(magnitude_b_sum));
-            return 1 - cosine_similarity;
+            return finalizeDistance(dp_sum, ma_sum, mb_sum);
         }
-        fn canUseSIMD(self: *const Self, comptime ValType: type) bool {
+
+        fn finalizeDistance(dot_product: T, magnitude_a: T, magnitude_b: T) T {
+            // Handle potential division by zero
+            if (magnitude_a == 0 or magnitude_b == 0) {
+                return if (magnitude_a == magnitude_b) 0 else 1;
+            }
+
+            const cosine_similarity = dot_product / (std.math.sqrt(magnitude_a) * std.math.sqrt(magnitude_b));
+            // Clamp the cosine_similarity to [-1, 1] to avoid domain errors with acos
+            const clamped_similarity = std.math.clamp(cosine_similarity, -1, 1);
+            return std.math.acos(clamped_similarity) / std.math.pi;
+        }
+
+        // SIMD RELATED HELPERS
+        fn simdReduce(comptime Target: type, v: @Vector(SIMD_WIDTH, T)) T {
+            const result = @reduce(.Add, v);
+            return switch (@typeInfo(Target)) {
+                .Float => result,
+                .Int => @as(T, @intCast(result)),
+                else => @compileError("Unsupported type for SIMD reduction"),
+            };
+        }
+
+        fn canUseSIMD(comptime ValType: type) bool {
             if (!std.Target.x86.featureSetHas(builtin.cpu.features, .sse)) {
                 return false;
             }
-            return switch (ValType) {
-                f32 => true,
-                f64 => std.Target.x86.featureSetHas(builtin.cpu.features, .sse2),
+            return switch (@typeInfo(ValType)) {
+                .Float => |info| switch (info.bits) {
+                    32 => true,
+                    64 => std.Target.x86.featureSetHas(builtin.cpu.features, .sse2),
+                    else => false,
+                },
+                .Int => |info| switch (info.bits) {
+                    8, 16, 32, 64 => std.Target.x86.featureSetHas(builtin.cpu.features, .sse2),
+                    else => false,
+                },
                 else => false,
             };
         }
 
-        const SIMD_WIDTH = switch (T) {
-            f32 => if (std.Target.x86.featureSetHas(builtin.cpu.features, .avx)) 8 else 4,
-            f64 => if (std.Target.x86.featureSetHas(builtin.cpu.features, .avx)) 4 else 2,
+        const SIMD_WIDTH = switch (@typeInfo(T)) {
+            .Float => |info| switch (info.bits) {
+                32 => if (std.Target.x86.featureSetHas(builtin.cpu.features, .avx)) 8 else 4,
+                64 => if (std.Target.x86.featureSetHas(builtin.cpu.features, .avx)) 4 else 2,
+                else => 1,
+            },
+            .Int => |info| switch (info.bits) {
+                8 => if (std.Target.x86.featureSetHas(builtin.cpu.features, .avx2)) 32 else 16,
+                16 => if (std.Target.x86.featureSetHas(builtin.cpu.features, .avx2)) 16 else 8,
+                32 => if (std.Target.x86.featureSetHas(builtin.cpu.features, .avx2)) 8 else 4,
+                64 => if (std.Target.x86.featureSetHas(builtin.cpu.features, .avx2)) 4 else 2,
+                else => 1,
+            },
             else => 1,
         };
 
+        // Finally, the search method.
         pub fn search(self: *Self, query: []const T, k: usize) ![]const Node {
             self.mutex.lock();
             defer self.mutex.unlock();
@@ -383,11 +455,12 @@ pub fn HNSW(comptime T: type) type {
 
             const Context = struct {
                 query: []const T,
+                self: *const Self,
                 pub fn lessThan(ctx: @This(), a: Node, b: Node) bool {
-                    return self.distance(ctx.query, a.point) < self.distance(ctx.query, b.point);
+                    return ctx.self.distance(ctx.query, a.point) < ctx.self.distance(ctx.query, b.point);
                 }
             };
-            std.sort.insertion(Node, result.items, Context{ .query = query }, Context.lessThan);
+            std.sort.insertion(Node, result.items, Context{ .query = query, .self = self }, Context.lessThan);
 
             return result.toOwnedSlice();
         }
