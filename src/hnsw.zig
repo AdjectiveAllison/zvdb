@@ -189,6 +189,7 @@ pub fn HNSW(comptime T: type, comptime distance_metric: DistanceMetric) type {
             return level;
         }
 
+        // Hooray, distance!!!
         fn distance(a: []const T, b: []const T) T {
             return switch (distance_metric) {
                 .Euclidean => euclideanDistance(a, b),
@@ -197,7 +198,6 @@ pub fn HNSW(comptime T: type, comptime distance_metric: DistanceMetric) type {
             };
         }
 
-        // Hooray, distance!!!
         fn checkDimensions(a: []const T, b: []const T) void {
             if (a.len != b.len) {
                 @panic("Mismatched dimensions in distance calculation");

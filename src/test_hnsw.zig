@@ -328,103 +328,123 @@ test "HNSW - Consistency" {
     }
 }
 
-// test "HNSW - Different Distance Metrics" {
-//     const allocator = testing.allocator;
+// New test to ensure Euclidean distance is functioning correctly
+test "HNSW - Euclidean Distance Functionality" {
+    const allocator = testing.allocator;
+    const config = HNSWConfig{ .m = 16, .ef_construction = 200 };
+    var hnsw = HNSW(f32, .Euclidean).init(allocator, config);
+    defer hnsw.deinit();
 
-//     // Test data
-//     const points = [_][]const f32{
-//         &[_]f32{ 1, 1, 1 },
-//         &[_]f32{ 2, 2, 2 },
-//         &[_]f32{ 3, 3, 3 },
-//         &[_]f32{ 4, 4, 4 },
-//         &[_]f32{ 5, 5, 5 },
-//         &[_]f32{ 1, 5, 1 },
-//         &[_]f32{ 5, 1, 5 },
-//     };
-//     const query = &[_]f32{ 2, 2, 2 };
+    // Insert some points
+    try hnsw.insert(&[_]f32{ 0, 0, 0 });    // Point a
+    try hnsw.insert(&[_]f32{ 1, 1, 1 });    // Point b
+    try hnsw.insert(&[_]f32{ 2, 2, 2 });    // Point c
+    try hnsw.insert(&[_]f32{ -1, -1, -1 }); // Point d
+    try hnsw.insert(&[_]f32{ 3, 0, 0 });    // Point e
+    try hnsw.insert(&[_]f32{ 0, 4, 0 });    // Point f
 
-//     // Test with Euclidean distance (default)
-//     {
-//         const config = HNSWConfig{ .m = 16, .ef_construction = 200, .distance_metric = .Euclidean };
-//         var hnsw = HNSW(f32).init(allocator, config);
-//         defer hnsw.deinit();
+    // Query point
+    const query = &[_]f32{ 1, 0, 0 };
 
-//         for (points) |point| {
-//             try hnsw.insert(point);
-//         }
+    const results = try hnsw.search(query, 6);
+    defer allocator.free(results);
 
-//         const results = try hnsw.search(query, 3);
-//         defer allocator.free(results);
+    // Expected order: a, b, e, d, c, f
+    try testing.expectEqual(@as(usize, 6), results.len);
+    try testing.expectEqualSlices(f32, &[_]f32{ 0, 0, 0 }, results[0].point);    // a (Euclidean distance = 1)
+    try testing.expectEqualSlices(f32, &[_]f32{ 1, 1, 1 }, results[1].point);    // b (Euclidean distance = √2 ≈ 1.414)
+    try testing.expectEqualSlices(f32, &[_]f32{ 3, 0, 0 }, results[2].point);    // e (Euclidean distance = 2)
+    try testing.expectEqualSlices(f32, &[_]f32{ -1, -1, -1 }, results[3].point); // d (Euclidean distance = √6 ≈ 2.449)
+    try testing.expectEqualSlices(f32, &[_]f32{ 2, 2, 2 }, results[4].point);    // c (Euclidean distance = √5 ≈ 2.236)
+    try testing.expectEqualSlices(f32, &[_]f32{ 0, 4, 0 }, results[5].point);    // f (Euclidean distance = √17 ≈ 4.123)
 
-//         try testing.expectEqual(@as(usize, 3), results.len);
-//         try testing.expectEqualSlices(f32, points[1], results[0].point); // Exactly matching point
-//         try testing.expectEqualSlices(f32, points[0], results[1].point); // Closest in Euclidean space
-//         try testing.expectEqualSlices(f32, points[2], results[2].point); // Second closest in Euclidean space
-//     }
+    // Check approximate symmetry property
+    const point_a = &[_]f32{ 2, 2, 2 };
+    const point_b = &[_]f32{ -1, -1, -1 };
+    const k = 6;  // Number of nearest neighbors to retrieve
 
-//     // Test with Manhattan distance
-//     {
-//         const config = HNSWConfig{ .m = 16, .ef_construction = 200, .distance_metric = .Manhattan };
-//         var hnsw = HNSW(f32).init(allocator, config);
-//         defer hnsw.deinit();
+    const results_a = try hnsw.search(point_a, k);
+    defer allocator.free(results_a);
+    const results_b = try hnsw.search(point_b, k);
+    defer allocator.free(results_b);
 
-//         for (points) |point| {
-//             try hnsw.insert(point);
-//         }
+    // Check if point_b is in the k-nearest neighbors of point_a
+    var found_b_in_a = false;
+    for (results_a) |result| {
+        if (std.mem.eql(f32, result.point, point_b)) {
+            found_b_in_a = true;
+            break;
+        }
+    }
 
-//         const results = try hnsw.search(query, 3);
-//         defer allocator.free(results);
+    // Check if point_a is in the k-nearest neighbors of point_b
+    var found_a_in_b = false;
+    for (results_b) |result| {
+        if (std.mem.eql(f32, result.point, point_a)) {
+            found_a_in_b = true;
+            break;
+        }
+    }
 
-//         try testing.expectEqual(@as(usize, 3), results.len);
-//         try testing.expectEqualSlices(f32, points[1], results[0].point); // Exactly matching point
-//         try testing.expectEqualSlices(f32, points[0], results[1].point); // Closest in Manhattan distance
-//         try testing.expectEqualSlices(f32, points[2], results[2].point); // Second closest in Manhattan distance
-//     }
+    // Both points should be in each other's k-nearest neighbors
+    try testing.expect(found_b_in_a);
+    try testing.expect(found_a_in_b);
+}
 
-//     // Test with Cosine distance
-//     {
-//         const config = HNSWConfig{ .m = 16, .ef_construction = 200, .distance_metric = .Cosine };
-//         var hnsw = HNSW(f32).init(allocator, config);
-//         defer hnsw.deinit();
+// New test to ensure cosine distance is functioning correctly
+test "HNSW - Cosine Distance Functionality" {
+    const allocator = testing.allocator;
+    const config = HNSWConfig{ .m = 16, .ef_construction = 200 };
+    var hnsw = HNSW(f32, .Cosine).init(allocator, config);
+    defer hnsw.deinit();
 
-//         for (points) |point| {
-//             try hnsw.insert(point);
-//         }
+    // Insert some vectors
+    try hnsw.insert(&[_]f32{ 1, 0, 0 });     // Vector a
+    try hnsw.insert(&[_]f32{ 0, 1, 0 });     // Vector b
+    try hnsw.insert(&[_]f32{ 1, 1, 0 });     // Vector c
+    try hnsw.insert(&[_]f32{ -1, 0, 0 });    // Vector d
+    try hnsw.insert(&[_]f32{ 0.5, 0.5, 0 }); // Vector e
 
-//         const results = try hnsw.search(query, 3);
-//         defer allocator.free(results);
+    // Query vector
+    const query = &[_]f32{ 1, 1, 0 };
 
-//         try testing.expectEqual(@as(usize, 3), results.len);
-//         try testing.expectEqualSlices(f32, points[1], results[0].point); // Exactly matching point (cos similarity = 1)
-//         try testing.expectEqualSlices(f32, points[0], results[1].point); // Same direction, different magnitude
-//         try testing.expectEqualSlices(f32, points[2], results[2].point); // Same direction, different magnitude
-//     }
+    const results = try hnsw.search(query, 5);
+    defer allocator.free(results);
 
-//     // Additional test for Cosine distance with orthogonal vectors
-//     {
-//         const config = HNSWConfig{ .m = 16, .ef_construction = 200, .distance_metric = .Cosine };
-//         var hnsw = HNSW(f32).init(allocator, config);
-//         defer hnsw.deinit();
+    // Expected order: c, e, a, b, d
+    try testing.expectEqual(@as(usize, 5), results.len);
+    try testing.expectEqualSlices(f32, &[_]f32{ 1, 1, 0 }, results[0].point);     // c (cos similarity = 1)
+    try testing.expectEqualSlices(f32, &[_]f32{ 0.5, 0.5, 0 }, results[1].point); // e (cos similarity = 1)
+    try testing.expectEqualSlices(f32, &[_]f32{ 1, 0, 0 }, results[2].point);     // a (cos similarity = 1/√2)
+    try testing.expectEqualSlices(f32, &[_]f32{ 0, 1, 0 }, results[3].point);     // b (cos similarity = 1/√2)
+    try testing.expectEqualSlices(f32, &[_]f32{ -1, 0, 0 }, results[4].point);    // d (cos similarity = -1/√2)
+}
 
-//         const orthogonal_points = [_][]const f32{
-//             &[_]f32{ 1, 0, 0 },
-//             &[_]f32{ 0, 1, 0 },
-//             &[_]f32{ 0, 0, 1 },
-//             &[_]f32{ 1, 1, 0 },
-//         };
+// New test to ensure Manhattan distance is functioning correctly
+test "HNSW - Manhattan Distance Functionality" {
+    const allocator = testing.allocator;
+    const config = HNSWConfig{ .m = 16, .ef_construction = 200 };
+    var hnsw = HNSW(f32, .Manhattan).init(allocator, config);
+    defer hnsw.deinit();
 
-//         for (orthogonal_points) |point| {
-//             try hnsw.insert(point);
-//         }
+    // Insert some points
+    try hnsw.insert(&[_]f32{ 0, 0, 0 });   // Point a
+    try hnsw.insert(&[_]f32{ 1, 1, 1 });   // Point b
+    try hnsw.insert(&[_]f32{ 2, 2, 2 });   // Point c
+    try hnsw.insert(&[_]f32{ -1, -1, -1 }); // Point d
+    try hnsw.insert(&[_]f32{ 3, 0, 0 });   // Point e
 
-//         const orthogonal_query = &[_]f32{ 1, 1, 0 };
-//         const results = try hnsw.search(orthogonal_query, 4);
-//         defer allocator.free(results);
+    // Query point
+    const query = &[_]f32{ 1, 0, 0 };
 
-//         try testing.expectEqual(@as(usize, 4), results.len);
-//         try testing.expectEqualSlices(f32, orthogonal_points[3], results[0].point); // Exactly matching point
-//         try testing.expectEqualSlices(f32, orthogonal_points[0], results[1].point); // Cos similarity = 1/√2
-//         try testing.expectEqualSlices(f32, orthogonal_points[1], results[2].point); // Cos similarity = 1/√2
-//         try testing.expectEqualSlices(f32, orthogonal_points[2], results[3].point); // Cos similarity = 0 (orthogonal)
-//     }
-// }
+    const results = try hnsw.search(query, 5);
+    defer allocator.free(results);
+
+    // Expected order: a, b, e, d, c
+    try testing.expectEqual(@as(usize, 5), results.len);
+    try testing.expectEqualSlices(f32, &[_]f32{ 0, 0, 0 }, results[0].point);    // a (Manhattan distance = 1)
+    try testing.expectEqualSlices(f32, &[_]f32{ 1, 1, 1 }, results[1].point);    // b (Manhattan distance = 2)
+    try testing.expectEqualSlices(f32, &[_]f32{ 3, 0, 0 }, results[2].point);    // e (Manhattan distance = 2)
+    try testing.expectEqualSlices(f32, &[_]f32{ -1, -1, -1 }, results[3].point); // d (Manhattan distance = 4)
+    try testing.expectEqualSlices(f32, &[_]f32{ 2, 2, 2 }, results[4].point);    // c (Manhattan distance = 5)
+}
