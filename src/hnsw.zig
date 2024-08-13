@@ -94,7 +94,7 @@ pub fn HNSW(comptime T: type) type {
 
             if (self.entry_point) |entry| {
                 var ep_copy = entry;
-                var curr_dist = distance(self.distance_metric, self.distance_metric, node.point, self.nodes.get(ep_copy).?.point);
+                var curr_dist = self.distance(node.point, self.nodes.get(ep_copy).?.point);
 
                 for (0..self.max_level + 1) |layer| {
                     var changed = true;
@@ -104,7 +104,7 @@ pub fn HNSW(comptime T: type) type {
                         if (layer < curr_node.connections.len) {
                             for (curr_node.connections[layer].items) |neighbor_id| {
                                 const neighbor = self.nodes.get(neighbor_id).?;
-                                const dist = distance(self.distance_metric, node.point, neighbor.point);
+                                const dist = self.distance(node.point, neighbor.point);
                                 if (dist < curr_dist) {
                                     ep_copy = neighbor_id;
                                     curr_dist = dist;
@@ -154,7 +154,7 @@ pub fn HNSW(comptime T: type) type {
         fn shrinkConnections(self: *Self, node_id: usize, level: usize) !void {
             var node = self.nodes.getPtr(node_id).?;
             var connections = &node.connections[level];
-            if (connections.items.len <= self.m) return;
+            if (connections.items.len <= self.config.m) return;
 
             var candidates = try self.allocator.alloc(usize, connections.items.len);
             defer self.allocator.free(candidates);
@@ -168,16 +168,16 @@ pub fn HNSW(comptime T: type) type {
 
             const compareFn = struct {
                 fn compare(ctx: Context, a: usize, b: usize) bool {
-                    const dist_a = distance(self.distance_metric, ctx.node.point, ctx.self.nodes.get(a).?.point);
-                    const dist_b = distance(self.distance_metric, ctx.node.point, ctx.self.nodes.get(b).?.point);
+                    const dist_a = ctx.self.distance(ctx.node.point, ctx.self.nodes.get(a).?.point);
+                    const dist_b = ctx.self.distance(ctx.node.point, ctx.self.nodes.get(b).?.point);
                     return dist_a < dist_b;
                 }
             }.compare;
 
             std.sort.insertion(usize, candidates, context, compareFn);
 
-            connections.shrinkRetainingCapacity(self.m);
-            @memcpy(connections.items, candidates[0..self.m]);
+            connections.shrinkRetainingCapacity(self.config.m);
+            @memcpy(connections.items, candidates[0..self.config.m]);
         }
 
         fn randomLevel(self: *Self) usize {
@@ -195,33 +195,33 @@ pub fn HNSW(comptime T: type) type {
                 @panic("Mismatched dimensions in distance calculation");
             }
             return switch (self.config.distance_metric) {
-                .Euclidean => euclideanDistance(a, b),
-                .Manhattan => manhattanDistance(a, b),
-                .Cosine => cosineDistance(a, b),
+                .Euclidean => self.euclideanDistance(a, b),
+                .Manhattan => self.manhattanDistance(a, b),
+                .Cosine => self.cosineDistance(a, b),
             };
         }
 
-        fn euclideanDistance(a: []const T, b: []const T) T {
-            const squared = if (comptime canUseSIMD(T))
-                simdSquaredDistance(a, b)
+        fn euclideanDistance(self: *const Self, a: []const T, b: []const T) T {
+            const squared = if (comptime self.canUseSIMD(T))
+                self.simdSquaredDistance(a, b)
             else
-                scalarSquaredDistance(a, b);
+                self.scalarSquaredDistance(a, b);
             return std.math.sqrt(squared);
         }
 
-        fn manhattanDistance(a: []const T, b: []const T) T {
-            if (comptime canUseSIMD(T)) {
-                return simdManhattanDistance(a, b);
+        fn manhattanDistance(self: *const Self, a: []const T, b: []const T) T {
+            if (comptime self.canUseSIMD(T)) {
+                return self.simdManhattanDistance(a, b);
             } else {
-                return scalarManhattanDistance(a, b);
+                return self.scalarManhattanDistance(a, b);
             }
         }
 
-        fn cosineDistance(a: []const T, b: []const T) T {
-            if (comptime canUseSIMD(T)) {
-                return simdCosineDistance(a, b);
+        fn cosineDistance(self: *const Self, a: []const T, b: []const T) T {
+            if (comptime self.canUseSIMD(T)) {
+                return self.simdCosineDistance(a, b);
             } else {
-                return scalarCosineDistance(a, b);
+                return self.scalarCosineDistance(a, b);
             }
         }
 
@@ -331,7 +331,7 @@ pub fn HNSW(comptime T: type) type {
             const cosine_similarity = dot_product_sum / (std.math.sqrt(magnitude_a_sum) * std.math.sqrt(magnitude_b_sum));
             return 1 - cosine_similarity;
         }
-        fn canUseSIMD(comptime ValType: type) bool {
+        fn canUseSIMD(self: *const Self, comptime ValType: type) bool {
             if (!std.Target.x86.featureSetHas(builtin.cpu.features, .sse)) {
                 return false;
             }
@@ -362,7 +362,7 @@ pub fn HNSW(comptime T: type) type {
                 var visited = std.AutoHashMap(usize, void).init(self.allocator);
                 defer visited.deinit();
 
-                try candidates.add(.{ .id = entry, .distance = distance(self.distance_metric, query, self.nodes.get(entry).?.point) });
+                try candidates.add(.{ .id = entry, .distance = self.distance(query, self.nodes.get(entry).?.point) });
                 try visited.put(entry, {});
 
                 while (candidates.count() > 0 and result.items.len < k) {
@@ -373,7 +373,7 @@ pub fn HNSW(comptime T: type) type {
                     for (current_node.connections[0].items) |neighbor_id| {
                         if (!visited.contains(neighbor_id)) {
                             const neighbor = self.nodes.get(neighbor_id).?;
-                            const dist = distance(self.distance_metric, query, neighbor.point);
+                            const dist = self.distance(query, neighbor.point);
                             try candidates.add(.{ .id = neighbor_id, .distance = dist });
                             try visited.put(neighbor_id, {});
                         }
@@ -384,7 +384,7 @@ pub fn HNSW(comptime T: type) type {
             const Context = struct {
                 query: []const T,
                 pub fn lessThan(ctx: @This(), a: Node, b: Node) bool {
-                    return distance(self.distance_metric, ctx.query, a.point) < distance(self.distance_metric, ctx.query, b.point);
+                    return self.distance(ctx.query, a.point) < self.distance(ctx.query, b.point);
                 }
             };
             std.sort.insertion(Node, result.items, Context{ .query = query }, Context.lessThan);
