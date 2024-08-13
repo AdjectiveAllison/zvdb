@@ -83,7 +83,7 @@ pub fn HNSW(comptime T: type) type {
                 .Manhattan => distance.DistanceFunctions(T).manhattanDistance(a, b),
                 .Cosine => switch (@typeInfo(T)) {
                     .Float => distance.DistanceFunctions(T).cosineDistance(a, b),
-                    else => @compileError("Cosine distance is only supported for floating-point types"),
+                    else => @panic("Cosine distance is only supported for floating-point types"),
                 },
             };
         }

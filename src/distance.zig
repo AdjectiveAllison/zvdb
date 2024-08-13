@@ -48,17 +48,6 @@ pub fn DistanceFunctions(comptime T: type) type {
             else => 1,
         };
 
-        pub fn getFunction(metric: DistanceMetric) DistanceFunction {
-            return switch (metric) {
-                .Euclidean => euclideanDistance,
-                .Manhattan => manhattanDistance,
-                .Cosine => switch (@typeInfo(T)) {
-                    .Float => cosineDistance,
-                    else => @compileError("Cosine distance is only supported for floating-point types"),
-                },
-            };
-        }
-
         pub fn euclideanDistance(a: []const T, b: []const T) T {
             checkDimensions(a, b);
             const sum_of_squares = if (comptime canUseSIMD(T))
@@ -273,5 +262,12 @@ pub fn calculateDistance(comptime T: type, metric: DistanceMetric, a: []const T,
     if (a.len != b.len) {
         return DistanceError.MismatchedDimensions;
     }
-    return DistanceFunctions(T).getFunction(metric)(a, b);
+    return switch (metric) {
+        .Euclidean => DistanceFunctions(T).euclideanDistance(a, b),
+        .Manhattan => DistanceFunctions(T).manhattanDistance(a, b),
+        .Cosine => switch (@typeInfo(T)) {
+            .Float => DistanceFunctions(T).cosineDistance(a, b),
+            else => @panic("Cosine distance is only supported for floating-point types"),
+        },
+    };
 }
