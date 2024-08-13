@@ -55,7 +55,7 @@ pub fn randomPoint(allocator: std.mem.Allocator, dim: usize, rng: std.Random) ![
 }
 
 pub fn buildIndex(allocator: std.mem.Allocator, dim: usize, num_points: usize) !HNSW(f32) {
-    var hnsw = HNSW(f32).init(allocator, 16, 200);
+    var hnsw = try HNSW(f32).init(allocator, .{.m = 16, .ef_construction = 200});
     errdefer hnsw.deinit();
 
     var prng = std.Random.DefaultPrng.init(42);
