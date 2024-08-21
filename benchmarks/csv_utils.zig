@@ -30,7 +30,7 @@ pub fn getCsvFilePath(allocator: std.mem.Allocator, git_commit: []const u8) ![]c
 }
 
 pub fn ensureCsvHeaderExists(file_path: []const u8) !void {
-    const header = "operation,dimensions,k,num_threads,total_time_ns,operations_performed,operations_per_second";
+    const header = "operation,dimensions,k,num_threads,partition_size,total_time_ns,operations_performed,operations_per_second";
 
     // Create the directory if it doesn't exist
     const dir_path = std.fs.path.dirname(file_path) orelse ".";

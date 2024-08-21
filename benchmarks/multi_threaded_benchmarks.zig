@@ -6,27 +6,29 @@ pub fn runMultiThreadedBenchmarks(allocator: std.mem.Allocator, config: shared.B
     std.debug.print("Running Multi-Threaded Benchmarks\n", .{});
     std.debug.print("================================\n\n", .{});
 
-    const thread_counts = [_]usize{ 2, 4, 8 };
-
     for (config.dimensions) |dim| {
-        for (thread_counts) |thread_count| {
-            // Build the index
-            var hnsw = try shared.buildIndex(allocator, dim, config.index_size);
-            defer hnsw.deinit();
+        for (config.thread_counts) |thread_count| {
+            for (config.partition_sizes) |partition_size| {
+                std.debug.print("Dimension: {d}, Threads: {d}, Partition Size: {d}\n", .{ dim, thread_count, partition_size });
 
-            // Insertion benchmark
-            const insertion_result = try shared.runInsertionBenchmark(allocator, &hnsw, dim, config.num_index_operations, thread_count);
-            std.debug.print("{}\n", .{insertion_result});
-            try shared.appendResultToCsv(allocator, insertion_result, csv_file_path);
+                // Build the index
+                var hnsw = try shared.buildIndex(allocator, dim, config.index_size, thread_count, partition_size);
+                defer hnsw.deinit();
 
-            // Search benchmarks
-            for (config.k_values) |k| {
-                const search_result = try shared.runSearchBenchmark(allocator, &hnsw, dim, k, config.num_search_operations, thread_count);
-                std.debug.print("{}\n", .{search_result});
-                try shared.appendResultToCsv(allocator, search_result, csv_file_path);
+                // Insertion benchmark
+                const insertion_result = try shared.runInsertionBenchmark(allocator, &hnsw, dim, config.num_index_operations, thread_count, partition_size);
+                std.debug.print("{}\n", .{insertion_result});
+                try shared.appendResultToCsv(allocator, insertion_result, csv_file_path);
+
+                // Search benchmarks
+                for (config.k_values) |k| {
+                    const search_result = try shared.runSearchBenchmark(allocator, &hnsw, dim, k, config.num_search_operations, thread_count, partition_size);
+                    std.debug.print("{}\n", .{search_result});
+                    try shared.appendResultToCsv(allocator, search_result, csv_file_path);
+                }
+
+                std.debug.print("\n", .{});
             }
-
-            std.debug.print("\n", .{});
         }
     }
 }
@@ -45,9 +47,11 @@ pub fn main() !void {
     const config = shared.BenchmarkConfig{
         .dimensions = &[_]usize{ 128, 512, 768, 1024 },
         .k_values = &[_]usize{ 10, 25, 50 },
-        .index_size = 100000,
-        .num_index_operations = 10000,
-        .num_search_operations = 3000,
+        .thread_counts = &[_]usize{ 1, 2, 4, 8 },
+        .partition_sizes = &[_]usize{ 100, 500, 1000, 5000 },
+        .index_size = 250000,
+        .num_index_operations = 25000,
+        .num_search_operations = 25000,
     };
 
     try runMultiThreadedBenchmarks(allocator, config, csv_file_path);

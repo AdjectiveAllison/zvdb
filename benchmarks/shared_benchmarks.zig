@@ -6,7 +6,8 @@ pub const BenchmarkResult = struct {
     operation: []const u8,
     dimensions: usize,
     k: ?usize,
-    num_threads: ?usize,
+    num_threads: usize,
+    partition_size: usize,
     total_time_ns: u64,
     operations_performed: usize,
     operations_per_second: f64,
@@ -25,20 +26,20 @@ pub const BenchmarkResult = struct {
         if (self.k) |k_value| {
             try writer.print("  k: {d}\n", .{k_value});
         }
-        if (self.num_threads) |threads| {
-            try writer.print("  Threads: {d}\n", .{threads});
-        }
+        try writer.print("  Threads: {d}\n", .{self.num_threads});
+        try writer.print("  Partition Size: {d}\n", .{self.partition_size});
         try writer.print("  Total time: {d:.2} seconds\n", .{@as(f64, @floatFromInt(self.total_time_ns)) / 1e9});
         try writer.print("  Operations performed: {d}\n", .{self.operations_performed});
         try writer.print("  {s} per second: {d:.2}\n", .{ self.operation, self.operations_per_second });
     }
 
     pub fn toCsv(self: BenchmarkResult, allocator: std.mem.Allocator) ![]const u8 {
-        return try std.fmt.allocPrint(allocator, "{s},{d},{d},{d},{d},{d},{d:.2}", .{
+        return try std.fmt.allocPrint(allocator, "{s},{d},{d},{d},{d},{d},{d},{d:.2}", .{
             self.operation,
             self.dimensions,
             self.k orelse 0,
-            self.num_threads orelse 1,
+            self.num_threads,
+            self.partition_size,
             self.total_time_ns,
             self.operations_performed,
             self.operations_per_second,
@@ -54,8 +55,23 @@ pub fn randomPoint(allocator: std.mem.Allocator, dim: usize, rng: std.Random) ![
     return point;
 }
 
-pub fn buildIndex(allocator: std.mem.Allocator, dim: usize, num_points: usize) !HNSW(f32) {
-    var hnsw = try HNSW(f32).init(allocator, .{.m = 16, .ef_construction = 100});
+pub const BenchmarkConfig = struct {
+    dimensions: []const usize,
+    k_values: []const usize,
+    thread_counts: []const usize,
+    partition_sizes: []const usize,
+    index_size: usize,
+    num_index_operations: usize,
+    num_search_operations: usize,
+};
+
+pub fn buildIndex(allocator: std.mem.Allocator, dim: usize, num_points: usize, num_threads: usize, partition_size: usize) !HNSW(f32) {
+    var hnsw = try HNSW(f32).init(allocator, .{
+        .m = 16,
+        .ef_construction = 100,
+        .num_threads = num_threads,
+        .partition_size = partition_size,
+    });
     errdefer hnsw.deinit();
 
     var prng = std.Random.DefaultPrng.init(42);
@@ -70,7 +86,7 @@ pub fn buildIndex(allocator: std.mem.Allocator, dim: usize, num_points: usize) !
     return hnsw;
 }
 
-pub fn runInsertionBenchmark(allocator: std.mem.Allocator, hnsw: *HNSW(f32), dim: usize, num_operations: usize, num_threads: ?usize) !BenchmarkResult {
+pub fn runInsertionBenchmark(allocator: std.mem.Allocator, hnsw: *HNSW(f32), dim: usize, num_operations: usize, num_threads: usize, partition_size: usize) !BenchmarkResult {
     var prng = std.Random.DefaultPrng.init(42);
     const rng = prng.random();
 
@@ -91,13 +107,14 @@ pub fn runInsertionBenchmark(allocator: std.mem.Allocator, hnsw: *HNSW(f32), dim
         .dimensions = dim,
         .k = null,
         .num_threads = num_threads,
+        .partition_size = partition_size,
         .total_time_ns = elapsed_ns,
         .operations_performed = num_operations,
         .operations_per_second = operations_per_second,
     };
 }
 
-pub fn runSearchBenchmark(allocator: std.mem.Allocator, hnsw: *HNSW(f32), dim: usize, k: usize, num_operations: usize, num_threads: ?usize) !BenchmarkResult {
+pub fn runSearchBenchmark(allocator: std.mem.Allocator, hnsw: *HNSW(f32), dim: usize, k: usize, num_operations: usize, num_threads: usize, partition_size: usize) !BenchmarkResult {
     var prng = std.Random.DefaultPrng.init(42);
     const rng = prng.random();
 
@@ -119,19 +136,12 @@ pub fn runSearchBenchmark(allocator: std.mem.Allocator, hnsw: *HNSW(f32), dim: u
         .dimensions = dim,
         .k = k,
         .num_threads = num_threads,
+        .partition_size = partition_size,
         .total_time_ns = elapsed_ns,
         .operations_performed = num_operations,
         .operations_per_second = operations_per_second,
     };
 }
-
-pub const BenchmarkConfig = struct {
-    dimensions: []const usize,
-    k_values: []const usize,
-    index_size: usize,
-    num_index_operations: usize,
-    num_search_operations: usize,
-};
 
 pub fn appendResultToCsv(allocator: std.mem.Allocator, result: BenchmarkResult, file_path: []const u8) !void {
     try csv_utils.ensureCsvHeaderExists(file_path);
