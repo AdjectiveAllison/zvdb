@@ -7,11 +7,14 @@ const AutoHashMap = std.AutoHashMap;
 const Order = std.math.Order;
 const RwLock = std.Thread.RwLock;
 const AtomicValue = std.atomic.Value;
+const Thread = std.Thread;
 
 pub const HNSWConfig = struct {
     m: usize,
     ef_construction: usize,
     distance: distance.DistanceMetric = .Euclidean,
+    num_threads: usize = 1,
+    partition_size: usize = 1000,
 };
 
 pub fn HNSW(comptime T: type) type {
@@ -56,9 +59,15 @@ pub fn HNSW(comptime T: type) type {
         max_level: AtomicValue(usize),
         config: HNSWConfig,
         global_lock: RwLock,
+        partitions: []ArrayList(usize),
 
         pub fn init(allocator: Allocator, config: HNSWConfig) !Self {
             try distance.validateMetricForType(config.distance, T);
+            const num_partitions = @max(1, config.num_threads);
+            const partitions = try allocator.alloc(ArrayList(usize), num_partitions);
+            for (partitions) |*partition| {
+                partition.* = ArrayList(usize).init(allocator);
+            }
             return .{
                 .allocator = allocator,
                 .nodes = AutoHashMap(usize, Node).init(allocator),
@@ -66,6 +75,7 @@ pub fn HNSW(comptime T: type) type {
                 .max_level = AtomicValue(usize).init(0),
                 .config = config,
                 .global_lock = RwLock{},
+                .partitions = partitions,
             };
         }
 
@@ -76,6 +86,10 @@ pub fn HNSW(comptime T: type) type {
                 node.deinit(self.allocator);
             }
             self.nodes.deinit();
+            for (self.partitions) |*partition| {
+                partition.deinit();
+            }
+            self.allocator.free(self.partitions);
         }
 
         fn calculateDistance(self: *const Self, a: []const T, b: []const T) T {
@@ -177,14 +191,14 @@ pub fn HNSW(comptime T: type) type {
             defer self.allocator.free(candidates);
             @memcpy(candidates, connections.items);
 
-            const Context = struct {
+            const ShrinkContext = struct {
                 self: *Self,
                 node: *Node,
             };
-            const context = Context{ .self = self, .node = node };
+            const context = ShrinkContext{ .self = self, .node = node };
 
             const compareFn = struct {
-                fn compare(ctx: Context, a: usize, b: usize) bool {
+                fn compare(ctx: ShrinkContext, a: usize, b: usize) bool {
                     const dist_a = ctx.self.calculateDistance(ctx.node.point, ctx.self.nodes.get(a).?.point);
                     const dist_b = ctx.self.calculateDistance(ctx.node.point, ctx.self.nodes.get(b).?.point);
                     return dist_a < dist_b;
@@ -208,6 +222,14 @@ pub fn HNSW(comptime T: type) type {
         }
 
         pub fn search(self: *Self, query: []const T, k: usize) ![]const Node {
+            if (self.config.num_threads > 1) {
+                return self.parallelSearch(query, k);
+            } else {
+                return self.sequentialSearch(query, k);
+            }
+        }
+
+        fn sequentialSearch(self: *Self, query: []const T, k: usize) ![]const Node {
             self.global_lock.lockShared();
             defer self.global_lock.unlockShared();
 
@@ -245,16 +267,116 @@ pub fn HNSW(comptime T: type) type {
                 }
             }
 
-            const Context = struct {
-                self: *const Self,
-                query: []const T,
-                pub fn lessThan(ctx: @This(), a: Node, b: Node) bool {
-                    return ctx.self.calculateDistance(ctx.query, a.point) < ctx.self.calculateDistance(ctx.query, b.point);
-                }
-            };
             std.sort.insertion(Node, result.items, Context{ .self = self, .query = query }, Context.lessThan);
 
             return result.toOwnedSlice();
+        }
+
+        pub fn parallelSearch(self: *Self, query: []const T, k: usize) ![]const Node {
+            self.global_lock.lockShared();
+            defer self.global_lock.unlockShared();
+
+            var result = try ArrayList(Node).initCapacity(self.allocator, k);
+            errdefer result.deinit();
+
+            const entry = self.entry_point.load(.acquire);
+            if (entry != std.math.maxInt(usize)) {
+                var upper_candidates = try self.searchUpperLayers(query);
+                defer upper_candidates.deinit();
+
+                var lower_candidates = try self.searchLowerLayers(query, upper_candidates);
+                defer lower_candidates.deinit();
+
+                while (lower_candidates.count() > 0 and result.items.len < k) {
+                    const current = lower_candidates.remove();
+                    var current_node = self.nodes.get(current.id).?;
+                    current_node.lock.lockShared();
+                    try result.append(current_node);
+                    current_node.lock.unlockShared();
+                }
+            }
+
+            std.sort.insertion(Node, result.items, Context{ .self = self, .query = query }, Context.lessThan);
+
+            return result.toOwnedSlice();
+        }
+
+        const ThreadContext = struct {
+            self: *Self,
+            query: []const T,
+            partition: *const ArrayList(usize),
+            candidates: *std.PriorityQueue(CandidateNode, void, CandidateNode.lessThan),
+            lock: *RwLock,
+        };
+
+        fn searchUpperLayers(self: *Self, query: []const T) !std.PriorityQueue(CandidateNode, void, CandidateNode.lessThan) {
+            var candidates = std.PriorityQueue(CandidateNode, void, CandidateNode.lessThan).init(self.allocator, {});
+            errdefer candidates.deinit();
+
+            var threads = try self.allocator.alloc(Thread, self.partitions.len);
+            defer self.allocator.free(threads);
+
+            var thread_contexts = try self.allocator.alloc(ThreadContext, self.partitions.len);
+            defer self.allocator.free(thread_contexts);
+
+            var candidates_lock = RwLock{};
+
+            for (self.partitions, 0..) |*partition, i| {
+                thread_contexts[i] = .{
+                    .self = self,
+                    .query = query,
+                    .partition = partition,
+                    .candidates = &candidates,
+                    .lock = &candidates_lock,
+                };
+                threads[i] = try Thread.spawn(.{}, searchPartition, .{&thread_contexts[i]});
+            }
+
+            for (threads) |thread| {
+                thread.join();
+            }
+
+            return candidates;
+        }
+
+        fn searchPartition(ctx: *const ThreadContext) void {
+            for (ctx.partition.items) |node_id| {
+                const node = ctx.self.nodes.get(node_id).?;
+                const dist = ctx.self.calculateDistance(ctx.query, node.point);
+                ctx.lock.lock();
+                ctx.candidates.add(.{ .id = node_id, .distance = dist }) catch {};
+                ctx.lock.unlock();
+            }
+        }
+
+        fn searchLowerLayers(self: *Self, query: []const T, mut_upper_candidates: std.PriorityQueue(CandidateNode, void, CandidateNode.lessThan)) !std.PriorityQueue(CandidateNode, void, CandidateNode.lessThan) {
+            var upper_candidates = mut_upper_candidates;
+            var lower_candidates = std.PriorityQueue(CandidateNode, void, CandidateNode.lessThan).init(self.allocator, {});
+            errdefer lower_candidates.deinit();
+
+            var visited = std.AutoHashMap(usize, void).init(self.allocator);
+            defer visited.deinit();
+
+            while (upper_candidates.count() > 0) {
+                const current = upper_candidates.remove();
+                if (visited.contains(current.id)) continue;
+                try visited.put(current.id, {});
+
+                var current_node = self.nodes.get(current.id).?;
+                current_node.lock.lockShared();
+                for (current_node.connections[0].items) |neighbor_id| {
+                    if (!visited.contains(neighbor_id)) {
+                        var neighbor = self.nodes.get(neighbor_id).?;
+                        neighbor.lock.lockShared();
+                        const dist = self.calculateDistance(query, neighbor.point);
+                        neighbor.lock.unlockShared();
+                        try lower_candidates.add(.{ .id = neighbor_id, .distance = dist });
+                    }
+                }
+                current_node.lock.unlockShared();
+            }
+
+            return lower_candidates;
         }
 
         const CandidateNode = struct {
@@ -263,6 +385,14 @@ pub fn HNSW(comptime T: type) type {
 
             fn lessThan(_: void, a: CandidateNode, b: CandidateNode) std.math.Order {
                 return std.math.order(a.distance, b.distance);
+            }
+        };
+
+        const Context = struct {
+            self: *const Self,
+            query: []const T,
+            pub fn lessThan(ctx: @This(), a: Node, b: Node) bool {
+                return ctx.self.calculateDistance(ctx.query, a.point) < ctx.self.calculateDistance(ctx.query, b.point);
             }
         };
     };
