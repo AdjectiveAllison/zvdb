@@ -14,19 +14,29 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(lib);
 
     // Create a module for the library
-    const lib_module = b.addModule("zvdb", .{
+    _ = b.addModule("zvdb", .{
         .root_source_file = b.path("src/zvdb.zig"),
     });
 
-    const hnsw_tests = b.addTest(.{
-        .root_source_file = b.path("src/test_hnsw.zig"),
+    const mcann_tests = b.addTest(.{
+        .root_source_file = b.path("src/test_mcann.zig"),
         .target = target,
         .optimize = optimize,
     });
-    const run_hnsw_tests = b.addRunArtifact(hnsw_tests);
+    const run_mcann_tests = b.addRunArtifact(mcann_tests);
 
-    const hnsw_test_step = b.step("test", "Run tests");
-    hnsw_test_step.dependOn(&run_hnsw_tests.step);
+    const mcann_test_step = b.step("test", "Run tests");
+    mcann_test_step.dependOn(&run_mcann_tests.step);
+
+    // const hnsw_tests = b.addTest(.{
+    //     .root_source_file = b.path("src/test_hnsw.zig"),
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
+    // const run_hnsw_tests = b.addRunArtifact(hnsw_tests);
+
+    // const hnsw_test_step = b.step("test", "Run tests");
+    // hnsw_test_step.dependOn(&run_hnsw_tests.step);
 
     // Add unit tests
     // const unit_tests = b.addTest(.{
@@ -50,38 +60,38 @@ pub fn build(b: *std.Build) void {
 
     // Benchmarks:
     // Single-threaded benchmarks
-    const single_threaded_benchmarks = b.addExecutable(.{
-        .name = "single_threaded_benchmarks",
-        .root_source_file = b.path("benchmarks/single_threaded_benchmarks.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    single_threaded_benchmarks.root_module.addImport("zvdb", lib_module);
-    b.installArtifact(single_threaded_benchmarks);
-
-    const run_single_threaded = b.addRunArtifact(single_threaded_benchmarks);
-    if (b.args) |args| {
-        run_single_threaded.addArgs(args);
-    }
-    const run_single_threaded_step = b.step("bench-single", "Run single-threaded benchmarks");
-    run_single_threaded_step.dependOn(&run_single_threaded.step);
-
-    // Multi-threaded benchmarks
-    const multi_threaded_benchmarks = b.addExecutable(.{
-        .name = "multi_threaded_benchmarks",
-        .root_source_file = b.path("benchmarks/multi_threaded_benchmarks.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-    multi_threaded_benchmarks.root_module.addImport("zvdb", lib_module);
-    b.installArtifact(multi_threaded_benchmarks);
-
-    const run_multi_threaded = b.addRunArtifact(multi_threaded_benchmarks);
-    if (b.args) |args| {
-        run_multi_threaded.addArgs(args);
-    }
-    const run_multi_threaded_step = b.step("bench-multi", "Run multi-threaded benchmarks");
-    run_multi_threaded_step.dependOn(&run_multi_threaded.step);
+    // const single_threaded_benchmarks = b.addExecutable(.{
+    //     .name = "single_threaded_benchmarks",
+    //     .root_source_file = b.path("benchmarks/single_threaded_benchmarks.zig"),
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
+    // single_threaded_benchmarks.root_module.addImport("zvdb", lib_module);
+    // b.installArtifact(single_threaded_benchmarks);
+    //
+    // const run_single_threaded = b.addRunArtifact(single_threaded_benchmarks);
+    // if (b.args) |args| {
+    //     run_single_threaded.addArgs(args);
+    // }
+    // const run_single_threaded_step = b.step("bench-single", "Run single-threaded benchmarks");
+    // run_single_threaded_step.dependOn(&run_single_threaded.step);
+    //
+    // // Multi-threaded benchmarks
+    // const multi_threaded_benchmarks = b.addExecutable(.{
+    //     .name = "multi_threaded_benchmarks",
+    //     .root_source_file = b.path("benchmarks/multi_threaded_benchmarks.zig"),
+    //     .target = target,
+    //     .optimize = optimize,
+    // });
+    // multi_threaded_benchmarks.root_module.addImport("zvdb", lib_module);
+    // b.installArtifact(multi_threaded_benchmarks);
+    //
+    // const run_multi_threaded = b.addRunArtifact(multi_threaded_benchmarks);
+    // if (b.args) |args| {
+    //     run_multi_threaded.addArgs(args);
+    // }
+    // const run_multi_threaded_step = b.step("bench-multi", "Run multi-threaded benchmarks");
+    // run_multi_threaded_step.dependOn(&run_multi_threaded.step);
 
     // Examples
     // const basic_example = b.addExecutable(.{
