@@ -14,7 +14,7 @@ pub fn build(b: *std.Build) void {
     b.installArtifact(lib);
 
     // Create a module for the library
-    _ = b.addModule("zvdb", .{
+    const lib_module = b.addModule("zvdb", .{
         .root_source_file = b.path("src/zvdb.zig"),
     });
 
@@ -28,6 +28,22 @@ pub fn build(b: *std.Build) void {
     const mcann_test_step = b.step("test", "Run tests");
     mcann_test_step.dependOn(&run_mcann_tests.step);
 
+    // Add the single-threaded benchmark
+    const single_threaded_benchmark = b.addExecutable(.{
+        .name = "single_threaded_benchmark",
+        .root_source_file = b.path("benchmarks/single_threaded_benchmark.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    single_threaded_benchmark.root_module.addImport("zvdb", lib_module);
+    b.installArtifact(single_threaded_benchmark);
+
+    const run_single_threaded = b.addRunArtifact(single_threaded_benchmark);
+    if (b.args) |args| {
+        run_single_threaded.addArgs(args);
+    }
+    const run_single_threaded_step = b.step("bench-single", "Run single-threaded benchmark");
+    run_single_threaded_step.dependOn(&run_single_threaded.step);
     // const hnsw_tests = b.addTest(.{
     //     .root_source_file = b.path("src/test_hnsw.zig"),
     //     .target = target,

@@ -1,6 +1,16 @@
 const std = @import("std");
 const testing = std.testing;
 const MCANN = @import("mcann.zig").MCANN;
+// Add this at the top of your test file
+pub fn main() !void {
+    // Set the log level to debug
+    std.log.default_level = .debug;
+    // Set up a logger that prints to stderr
+    std.log.default_handler = std.log.defaultLog;
+
+    // Run the tests
+    try std.testing.run();
+}
 
 fn randomPoint(comptime dim: comptime_int) [dim]f32 {
     var point: [dim]f32 = undefined;
@@ -22,7 +32,7 @@ fn euclideanDistance(a: []const f32, b: []const f32) f32 {
 
 test "MCANN - Basic Functionality" {
     const allocator = testing.allocator;
-    var mcann = MCANN(f32, 3).init(allocator, 5, 10);
+    var mcann = MCANN(f32, 3).init(allocator, 1024 * 1024); // 1MB memory budget
     defer mcann.deinit();
 
     try mcann.createCollection("test_collection");
@@ -41,19 +51,20 @@ test "MCANN - Basic Functionality" {
 
 test "MCANN - Empty Collection" {
     const allocator = testing.allocator;
-    var mcann = MCANN(f32, 3).init(allocator, 5, 10);
+    var mcann = MCANN(f32, 3).init(allocator, 1024 * 1024);
     defer mcann.deinit();
 
     try mcann.createCollection("empty_collection");
 
     const query = [_]f32{ 1, 2, 3 };
-    const results = mcann.search("empty_collection", query, 5);
-    try testing.expectError(error.NoTopClustersFound, results);
+    const results = try mcann.search("empty_collection", query, 5);
+    defer allocator.free(results);
+    try testing.expectEqual(@as(usize, 0), results.len);
 }
 
 test "MCANN - Single Point" {
     const allocator = testing.allocator;
-    var mcann = MCANN(f32, 3).init(allocator, 5, 10);
+    var mcann = MCANN(f32, 3).init(allocator, 1024 * 1024);
     defer mcann.deinit();
 
     try mcann.createCollection("single_point");
@@ -70,7 +81,7 @@ test "MCANN - Single Point" {
 
 test "MCANN - Multiple Collections" {
     const allocator = testing.allocator;
-    var mcann = MCANN(f32, 3).init(allocator, 5, 10);
+    var mcann = MCANN(f32, 3).init(allocator, 1024 * 1024);
     defer mcann.deinit();
 
     try mcann.createCollection("collection1");
@@ -91,7 +102,7 @@ test "MCANN - Multiple Collections" {
 
 test "MCANN - Large Dataset" {
     const allocator = testing.allocator;
-    var mcann = MCANN(f32, 128).init(allocator, 100, 10000); // Increased max_top_clusters to 100
+    var mcann = MCANN(f32, 128).init(allocator, 100 * 1024 * 1024); // 100MB memory budget
     defer mcann.deinit();
 
     try mcann.createCollection("large_collection");
@@ -109,9 +120,8 @@ test "MCANN - Large Dataset" {
     // Insert points
     for (points) |point| {
         try mcann.insert("large_collection", point);
-    }
+    } // Search for nearest neighbors
 
-    // Search for nearest neighbors
     const query = points[std.crypto.random.intRangeLessThan(usize, 0, num_points)];
 
     const k = 10;
@@ -127,35 +137,73 @@ test "MCANN - Large Dataset" {
         try testing.expect(dist >= last_dist);
         last_dist = dist;
     }
+
+    // Count the number of cluster files
+    var dir = try std.fs.cwd().openDir(".", .{ .iterate = true });
+    defer dir.close();
+
+    var file_count: usize = 0;
+    var it = dir.iterate();
+    while (try it.next()) |entry| {
+        if (std.mem.startsWith(u8, entry.name, "large_collection_cluster_") and std.mem.endsWith(u8, entry.name, ".bin")) {
+            file_count += 1;
+        }
+    }
+
+    std.log.info("Number of cluster files created: {}", .{file_count});
+    try testing.expect(file_count < 1000); // Adjust this number based on what you consider reasonable
 }
 
-test "MCANN - Edge Cases" {
+test "MCANN - Cluster Splitting" {
     const allocator = testing.allocator;
-    var mcann = MCANN(f32, 3).init(allocator, 2, 1000); // Increase max_sub_clusters to 1000
+    var mcann = MCANN(f32, 3).init(allocator, 1024 * 1024);
     defer mcann.deinit();
 
-    try mcann.createCollection("edge_cases");
+    try mcann.createCollection("split_test");
 
-    // Test inserting up to the limit
-    try mcann.insert("edge_cases", .{ 1, 2, 3 });
-    try mcann.insert("edge_cases", .{ 4, 5, 6 });
-    try mcann.insert("edge_cases", .{ 7, 8, 9 });
-    try mcann.insert("edge_cases", .{ 10, 11, 12 });
+    // Insert more points than the optimal cluster size
+    const num_points = 2000; // This should be larger than ClusterManager.optimal_cluster_size
+    for (0..num_points) |i| {
+        const point = [_]f32{ @floatFromInt(i), @floatFromInt(i), @floatFromInt(i) };
+        try mcann.insert("split_test", point);
+    }
 
-    // This should now succeed due to file growth
-    try mcann.insert("edge_cases", .{ 13, 14, 15 });
-
-    // Test searching with k larger than number of points
-    const query = [_]f32{ 1, 2, 3 };
-    const results = try mcann.search("edge_cases", query, 10);
+    // Search for a point
+    const query = [_]f32{ 1000, 1000, 1000 };
+    const results = try mcann.search("split_test", query, 10);
     defer allocator.free(results);
 
-    try testing.expectEqual(@as(usize, 5), results.len);
+    try testing.expectEqual(@as(usize, 10), results.len);
+    // The closest point should be very close to the query
+    try testing.expect(euclideanDistance(&query, &results[0]) < 1.0);
+}
+
+test "MCANN - Memory Management" {
+    const allocator = testing.allocator;
+    // Set a small memory budget to force memory management
+    var mcann = MCANN(f32, 3).init(allocator, 10 * 1024); // 10KB memory budget
+    defer mcann.deinit();
+
+    try mcann.createCollection("memory_test");
+
+    // Insert a large number of points
+    const num_points = 1000;
+    for (0..num_points) |i| {
+        const point = [_]f32{ @floatFromInt(i), @floatFromInt(i), @floatFromInt(i) };
+        try mcann.insert("memory_test", point);
+    }
+
+    // Perform a search to trigger memory management
+    const query = [_]f32{ 500, 500, 500 };
+    const results = try mcann.search("memory_test", query, 10);
+    defer allocator.free(results);
+
+    try testing.expectEqual(@as(usize, 10), results.len);
 }
 
 test "MCANN - Consistency" {
     const allocator = testing.allocator;
-    var mcann = MCANN(f32, 128).init(allocator, 10, 1000);
+    var mcann = MCANN(f32, 128).init(allocator, 10 * 1024 * 1024);
     defer mcann.deinit();
 
     try mcann.createCollection("consistency_test");
@@ -189,4 +237,20 @@ test "MCANN - Consistency" {
             }
         }
     }
+}
+
+test "MCANN - Error Handling" {
+    const allocator = testing.allocator;
+    var mcann = MCANN(f32, 3).init(allocator, 1024 * 1024);
+    defer mcann.deinit();
+
+    // Test creating a collection that already exists
+    try mcann.createCollection("error_test");
+    try testing.expectError(error.CollectionAlreadyExists, mcann.createCollection("error_test"));
+
+    // Test inserting into a non-existent collection
+    try testing.expectError(error.CollectionNotFound, mcann.insert("non_existent", .{ 1, 2, 3 }));
+
+    // Test searching in a non-existent collection
+    try testing.expectError(error.CollectionNotFound, mcann.search("non_existent", .{ 1, 2, 3 }, 1));
 }
