@@ -27,8 +27,8 @@ pub fn DistanceFunctions(comptime T: type, comptime size: comptime_int) type {
             const sum = @reduce(.Add, squared);
 
             return switch (@typeInfo(T)) {
-                .float => @sqrt(sum),
-                .int => {
+                .Float => @sqrt(sum),
+                .Int => {
                     const IntType = @Type(.{ .Int = .{
                         .signedness = .unsigned,
                         .bits = @max(@typeInfo(T).Int.bits * 2, 32),
