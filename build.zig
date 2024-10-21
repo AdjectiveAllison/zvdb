@@ -25,7 +25,17 @@ pub fn build(b: *std.Build) void {
     });
     const run_hnsw_tests = b.addRunArtifact(hnsw_tests);
 
-    const hnsw_test_step = b.step("test", "Run tests");
+    const hmmis_tests = b.addTest(.{
+        .root_source_file = b.path("src/test_hmmis.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const run_hmmis_tests = b.addRunArtifact(hmmis_tests);
+
+    const hnsw_test_step = b.step("test-hnsw", "Run tests for hnsw");
+    const hmmis_test_step = b.step("test", "Run tests for hmmis");
+    hmmis_test_step.dependOn(&run_hmmis_tests.step);
     hnsw_test_step.dependOn(&run_hnsw_tests.step);
 
     // Add unit tests
